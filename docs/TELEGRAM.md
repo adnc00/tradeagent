@@ -74,6 +74,7 @@ python -m tradeagent.cli check
 |---|---|
 | `API reddetti: Unauthorized` | Token yanlış veya eksik kopyalandı. BotFather'da `/mybots` → bot → **API Token** ile tekrar kopyalayın. |
 | `API reddetti: Bad Request: chat not found` | Chat id yanlış ya da bota hiç `Başlat` denmedi. 3. ve 4. adımları tekrarlayın. |
+| `Forbidden: the bot can't send messages to the bot` | `TELEGRAM_CHAT_ID` olarak botun kendi numarası (token'daki `:` işaretinden önceki sayı) yazılmış. 4. adımdaki `telegram-chatid` çıktısındaki sizin numaranızı yazın. |
 | `Forbidden: bot was blocked by the user` | Botu engellemişsiniz. Sohbeti açıp **Engeli kaldır** deyin. |
 | `gönderilemedi (URLError ...)` | İnternet bağlantısı veya güvenlik duvarı `api.telegram.org` adresini engelliyor. |
 | Mesaj gelmiyor ama hata da yok | `.env` dosyası `config.yaml` ile aynı klasörde mi? Dosyayı kaydettiniz mi? `check` ile kontrol edin. |

@@ -364,3 +364,9 @@ def test_close_all_uses_reduce_only_or_position_side_and_reports_failures():
     results = broker_with(hedged).close_all()
     assert [c[7] for c in hedged.created()] == [{"positionSide": "LONG"}, {"positionSide": "SHORT"}]
     assert [r.status for r in results] == ["failed", "failed"] and len({r.id for r in results}) == 2
+
+
+def test_signed_requests_compensate_for_clock_drift():
+    broker = CcxtBroker("binanceusdm", testnet=True, env=env_for("binanceusdm"))
+    assert broker._exchange.options.get("adjustForTimeDifference") is True
+    assert broker._exchange.options.get("recvWindow") == 10_000

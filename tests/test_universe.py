@@ -179,3 +179,46 @@ def test_check_reports_setup_without_revealing_secrets(tmp_path, monkeypatch, ca
 def test_notify_test_sends_a_sample_alert(tmp_path, stub_env):
     assert cli.main(["--config", str(write_config(tmp_path)), "notify-test"]) == 0
     assert any("test" in a.title.lower() for a in stub_env.alerts)
+
+
+def test_check_warns_about_clock_drift_and_failed_connection(tmp_path, monkeypatch, capsys):
+    path = write_config(tmp_path, mode="live", extra="crypto:\n  exchange: binanceusdm\n  testnet: true\n")
+    monkeypatch.setattr(cli, "clock_offset_ms", lambda cfg: -3_727_885.0)
+
+    def broken(*args, **kwargs):
+        raise cli.BrokerError("Timestamp for this request is outside of the recvWindow.")
+
+    monkeypatch.setattr(cli, "make_broker", broken)
+    assert cli.main(["--config", str(path), "check", "--live"]) == 1
+    out = capsys.readouterr().out
+    assert "62 dk" in out and "geride" in out
+    assert "Hazır görünüyor" not in out
+    assert "BAŞARISIZ" in out
+
+
+def test_check_accepts_a_synchronised_clock(tmp_path, monkeypatch, capsys):
+    path = write_config(tmp_path, mode="live", extra="crypto:\n  exchange: binanceusdm\n  testnet: true\n")
+    monkeypatch.setattr(cli, "clock_offset_ms", lambda cfg: 120.0)
+
+    class Ok:
+        name, environment = "ccxt:binanceusdm", "demo trading"
+
+        def get_balance(self):
+            from tradeagent.brokers.base import Balance
+            return Balance(equity=5000.0, free=5000.0, currency="USDT")
+
+    monkeypatch.setattr(cli, "make_broker", lambda *a, **k: Ok())
+    assert cli.main(["--config", str(path), "check", "--live"]) == 0
+    out = capsys.readouterr().out
+    assert "Saat" in out and "uyumlu" in out
+
+
+def test_check_flags_the_bot_id_used_as_chat_id(tmp_path, monkeypatch, capsys):
+    path = write_config(tmp_path)
+    (tmp_path / ".env").write_text("TELEGRAM_BOT_TOKEN=8123:TOPSECRET\nTELEGRAM_CHAT_ID=8123\n", encoding="utf-8")
+    for name in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"):
+        monkeypatch.delenv(name, raising=False)
+    cli.main(["--config", str(path), "check"])
+    out = capsys.readouterr().out
+    assert "botun kendi" in out
+    assert "TOPSECRET" not in out

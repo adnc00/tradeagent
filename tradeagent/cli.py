@@ -1093,6 +1093,28 @@ def cmd_watch(args: argparse.Namespace, cfg: Config) -> int:
         journal.close()
 
 
+CLOCK_TOLERANCE_MS = 1000
+CLOCK_FIX = (
+    "Windows saatini düzeltin: Ayarlar > Saat ve dil > Tarih ve saat > 'Saati otomatik ayarla' Açık, "
+    "saat dilimi '(UTC+03:00) İstanbul', ardından 'Şimdi eşitle'. Ajanın mum, killzone ve bilet zamanları bu saate dayanır."
+)
+
+
+def clock_offset_ms(cfg: Config) -> float:
+    """This computer's clock minus the exchange's clock, in milliseconds (public endpoint)."""
+    client = MarketData(cfg.crypto.exchange).ccxt_client()
+    before = time.time() * 1000.0
+    server = float(client.fetch_time())
+    after = time.time() * 1000.0
+    return (before + after) / 2.0 - server
+
+
+def describe_offset(offset_ms: float) -> str:
+    seconds = round(abs(offset_ms) / 1000.0)
+    amount = f"{seconds // 60} dk {seconds % 60} sn" if seconds >= 60 else f"{abs(offset_ms) / 1000.0:.1f} sn"
+    return f"{amount} {'geride' if offset_ms < 0 else 'ileride'}"
+
+
 def cmd_check(args: argparse.Namespace, cfg: Config) -> int:
     """Readiness report. Shows which settings and keys are present, never their values."""
     env_path = _env_path(cfg)
@@ -1104,6 +1126,7 @@ def cmd_check(args: argparse.Namespace, cfg: Config) -> int:
     keys_ok = env_is_set(key_var) and env_is_set(secret_var)
     token, chat_id = notify.telegram_settings()
     telegram_ok = bool(token and chat_id)
+    bot_id_as_chat = telegram_ok and chat_id == token.split(":", 1)[0]
     live_route = exchange == "binanceusdm"
     account = "demo trading (sanal para)" if cfg.crypto.testnet else "GERÇEK PARA"
     rows = [
@@ -1116,28 +1139,45 @@ def cmd_check(args: argparse.Namespace, cfg: Config) -> int:
         ("Risk", f"işlem başı %{cfg.risk.risk_pct}, günlük kayıp %{cfg.risk.daily_loss_pct}, açık risk %{cfg.risk.max_open_risk_pct}, kaldıraç ≤{num(cfg.risk.max_leverage)}x"),
         (".env", f"{env_path} ({'var' if env_path.is_file() else 'YOK'})"),
         (f"{key_var}/_SECRET", "tanımlı" if keys_ok else "eksik"),
-        ("Telegram", "tanımlı" if telegram_ok else ("token var, chat id eksik" if token else "eksik")),
+        ("Telegram", ("HATALI - chat id botun kendi kimliği" if bot_id_as_chat else "tanımlı") if telegram_ok else ("token var, chat id eksik" if token else "eksik")),
     ]
     for label, value in rows:
         print(f"{label:<22}: {value}")
     todo = []
     if not cfg.risk.allowlist:
         todo.append("config.yaml -> risk.allowlist doldurun (tüm USDT-M vadeliler için '*/USDT:USDT').")
+    if bot_id_as_chat:
+        todo.append("TELEGRAM_CHAT_ID botun kendi kimliği (token'ın ':' öncesi); bota mesaj gönderip tradeagent telegram-chatid ile kendi chat id'nizi alın.")
     if not telegram_ok:
         todo.append("Telegram: docs/TELEGRAM.md adımlarını izleyin (tradeagent telegram-chatid yardımcı olur).")
     if cfg.mode == "live" and not keys_ok:
         todo.append(f".env -> {key_var} ve {secret_var} (Binance Demo Trading anahtarları) girin.")
     status = EXIT_OK
     if args.live:
+        try:
+            offset = clock_offset_ms(cfg)
+        except Exception as exc:  # diagnostic only
+            print(f"{'Saat':<22}: ölçülemedi ({exc})")
+        else:
+            if abs(offset) <= CLOCK_TOLERANCE_MS:
+                print(f"{'Saat':<22}: Binance ile uyumlu (fark {offset:+.0f} ms)")
+            else:
+                print(f"{'Saat':<22}: SORUNLU - bilgisayar saati Binance'tan {describe_offset(offset)}")
+                todo.append(CLOCK_FIX)
+                status = EXIT_ABORTED
         if not live_enabled(cfg, True):
-            print("Hesap bağlantısı    : mode: paper olduğu için canlı/demo hesap denenmedi.")
+            print(f"{'Hesap bağlantısı':<22}: mode: paper olduğu için canlı/demo hesap denenmedi.")
         else:
             try:
                 broker = make_broker(cfg, "BTC/USDT:USDT", True)
                 balance = broker.get_balance()
-                print(f"Hesap bağlantısı    : OK - {broker.name} ({broker.environment}), özsermaye {money(balance.equity)} {balance.currency}")
+                print(
+                    f"{'Hesap bağlantısı':<22}: OK - {broker.name} ({broker.environment}), "
+                    f"özsermaye {money(balance.equity)} {balance.currency}"
+                )
             except Exception as exc:  # report, never raise: this is a diagnostic
-                print(f"Hesap bağlantısı    : BAŞARISIZ - {exc}")
+                print(f"{'Hesap bağlantısı':<22}: BAŞARISIZ - {exc}")
+                todo.append("Hesap bağlantısı başarısız: anahtarları, demo hesabın One-way modunu ve bilgisayar saatini kontrol edin.")
                 status = EXIT_ABORTED
     if todo:
         print("Yapılacaklar:")

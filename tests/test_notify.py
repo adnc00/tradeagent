@@ -239,3 +239,17 @@ def test_broadcast_returns_errors_and_still_uses_other_channels():
     assert delivered == [alert]
     assert sent == ["çalışan"]
     assert errors == ["bozuk: kapalı"]
+
+
+def test_telegram_error_carries_the_api_description():
+    import io
+    import urllib.error
+
+    def opener(request, timeout):
+        body = io.BytesIO(json.dumps({"ok": False, "description": "Forbidden: the bot can't send messages to the bot"}).encode())
+        raise urllib.error.HTTPError(request.full_url, 403, "Forbidden", {}, body)
+
+    with pytest.raises(notify.NotifyError) as excinfo:
+        notify.TelegramNotifier("123:SECRET", "123", opener=opener).send(notify.Alert("a", "b"))
+    assert "can't send messages to the bot" in str(excinfo.value)
+    assert "SECRET" not in str(excinfo.value)

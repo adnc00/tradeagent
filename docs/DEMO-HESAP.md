@@ -56,6 +56,8 @@ python -m tradeagent.cli check --live
 
 Beklenen satır: `Hesap bağlantısı : OK - ccxt:binanceusdm (demo trading ...), özsermaye ... USDT`. `BAŞARISIZ` görürseniz anahtarları ve One-way modunu kontrol edin.
 
+**Saat:** `check --live` çıktısında `Saat : SORUNLU` görürseniz önce Windows saatini düzeltin: Ayarlar → Saat ve dil → Tarih ve saat → "Saati otomatik ayarla" Açık, saat dilimi "(UTC+03:00) İstanbul", ardından "Şimdi eşitle". Binance istekleri küçük farkları kendisi telafi eder, ama ajanın mum kapanışı, killzone ve günlük kayıp hesapları bilgisayar saatine dayanır.
+
 ## 5. Önce tek tur deneyin
 
 ```powershell

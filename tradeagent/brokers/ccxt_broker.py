@@ -112,7 +112,12 @@ class CcxtBroker(Broker):
                 "apiKey": source[key_var],
                 "secret": source[secret_var],
                 "enableRateLimit": True,
-                "options": {"warnOnFetchOpenOrdersWithoutSymbol": False},
+                # Signed requests carry a timestamp; compensate for a drifting PC clock (Binance error -1021).
+                "options": {
+                    "warnOnFetchOpenOrdersWithoutSymbol": False,
+                    "adjustForTimeDifference": True,
+                    "recvWindow": 10_000,
+                },
             }
         )
         self.name = f"ccxt:{exchange_id}"

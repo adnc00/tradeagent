@@ -180,6 +180,17 @@ class ConsoleNotifier:
         print(f"{line}\n {alert.title}\n{line}\n{alert.body}\n{line}", flush=True)
 
 
+def _api_description(exc: Exception) -> str:
+    """Telegram's own reason from an HTTP error body ("Forbidden: bot was blocked by the user")."""
+    reader = getattr(exc, "read", None)
+    if reader is None:
+        return ""
+    try:
+        return str(json.loads(reader() or b"{}").get("description", ""))
+    except Exception:
+        return ""
+
+
 class TelegramNotifier:
     """Send-only Telegram bot client (Bot API ``sendMessage``)."""
 
@@ -202,7 +213,9 @@ class TelegramNotifier:
             with self._opener(request, timeout=TELEGRAM_TIMEOUT) as response:
                 payload = json.loads(response.read() or b"{}")
         except Exception as exc:  # network, HTTP and JSON errors alike
-            raise NotifyError(self._redact(f"gönderilemedi ({type(exc).__name__}: {exc})")) from None
+            detail = _api_description(exc)
+            message = f"gönderilemedi ({type(exc).__name__}: {exc})" + (f" - {detail}" if detail else "")
+            raise NotifyError(self._redact(message)) from None
         if not payload.get("ok"):
             raise NotifyError(self._redact(f"API reddetti: {payload.get('description', 'bilinmeyen hata')}"))
 
