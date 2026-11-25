@@ -294,3 +294,16 @@ def test_manual_trade_needs_an_allowed_symbol(server):
     code, body = post(server, "/api/manual", {"symbol": "DOGE/USDT", "side": "long", "entry": 1.0, "stop": 0.9,
                                               "target": 1.5, "risk_pct": 0.5})
     assert code == 200 and any("izin" in r for r in body["reasons"])
+
+
+def test_queue_says_why_a_ticket_was_not_sent_automatically(config_path):
+    ticket_id = scanned_ticket_id(config_path)
+    cfg = load_config(config_path)
+    journal = Journal(cfg.journal_path)
+    try:
+        journal.add_ticket_note(ticket_id, "otomatik gönderim reddi: BTC/USDT için zaten açık pozisyon veya emir var")
+    finally:
+        journal.close()
+    (ticket,) = panel.build_state(cfg)["awaiting"]
+    assert "zaten açık pozisyon" in ticket["why"]
+    assert not ticket["why"][:4].isdigit()  # no timestamp

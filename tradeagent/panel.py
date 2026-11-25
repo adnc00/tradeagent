@@ -41,7 +41,7 @@ TOKEN_PLACEHOLDER = b"{{PANEL_TOKEN}}"
 VERSION_PLACEHOLDER = b"{{PANEL_VERSION}}"
 TICKET_COLUMNS = (
     "id, symbol, side, market, timeframe, status, entry, stop, targets, qty, leverage, fee_rate, risk_amount, rr, "
-    "broker, mode, created_at, submitted_at, closed_at, result_r, pnl"
+    "broker, mode, created_at, submitted_at, closed_at, result_r, pnl, notes"
 )
 
 
@@ -206,6 +206,10 @@ def _mark_expiry(ticket: dict[str, Any], cfg: Config, moment: datetime) -> dict[
     created = _parse_time(ticket.get("created_at"))
     limit = timedelta(minutes=cfg.execution.ticket_max_age_minutes)
     ticket["expired"] = ticket.get("status") == "new" and (created is None or moment - created > limit)
+    lines = [line for line in (ticket.pop("notes", None) or "").splitlines() if line.strip()]
+    last = lines[-1] if lines else ""
+    head, sep, rest = last.partition("Z ")
+    ticket["why"] = (rest if sep and head[:4].isdigit() else last).removeprefix("otomatik gönderim reddi: ")
     try:
         ticket["rr_net"] = rr_after_fees(ticket["entry"], ticket["stop"], ticket["targets"][0], ticket.get("fee_rate") or 0.0)
     except (TypeError, ValueError, IndexError, KeyError):

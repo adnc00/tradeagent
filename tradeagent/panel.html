@@ -183,6 +183,7 @@ footer { color: var(--faint); font-size: var(--fs-small); display: flex; justify
 
 /* approval queue */
 .queue-empty { color: var(--faint); margin: 0; }
+.why { white-space: normal; display: inline-block; max-width: 280px; line-height: 1.35; }
 .await-row td { vertical-align: middle; }
 
 /* dialog */
@@ -817,6 +818,7 @@ function renderAwaiting(s) {
     { label: "Hedef", r: 1, get: t => price(t.targets[0]) },
     { label: "R:R", r: 1, get: t => t.rr_net == null ? "-" : n2.format(t.rr_net) },
     { label: "Geçerlilik", r: 1, get: t => when(t.expires_at) },
+    { label: "Neden bekliyor", get: t => el("span", { class: "sub why", title: t.why || "", text: t.why ? (t.why.length > 70 ? t.why.slice(0, 68) + "…" : t.why) : (auto ? "henüz değerlendirilmedi" : "onayınızı bekliyor") }) },
     { label: "", r: 1, get: t => el("div", { class: "actions" },
         el("button", { class: "btn small", type: "button", "data-dismiss": t.id, text: "Reddet" }),
         el("button", { class: "btn primary small", type: "button", "data-approve": t.id, text: "İncele ve onayla" })) },
