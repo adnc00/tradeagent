@@ -11,11 +11,14 @@ They are handed to ccxt and never stored on this object, logged or printed.
 Bracket order of operations (verified against the installed ccxt 4.5.93):
 
 1. Refuse hedge (dual-side) mode and any existing position or order on the
-   symbol (one ticket per symbol: the exits below close the whole position).
+   symbol (one ticket per symbol).
 2. Isolated margin and the ticket's leverage.
-3. Protective stop: STOP_MARKET with ``closePosition`` (ccxt passes the flag
-   through and drops the quantity), then the take-profit the same way. Both
-   exist BEFORE the entry, so a filled entry is never unprotected.
+3. Protective stop: STOP_MARKET, ``reduceOnly`` with the ticket's quantity, then
+   the take-profit the same way. Both exist BEFORE the entry, so a filled entry
+   is never unprotected; reduce-only means they can only shrink the position,
+   never open or flip one. (``closePosition`` legs are refused by Binance while
+   no position exists, error -4509; reduce-only legs are accepted, verified on
+   Demo Trading on 2026-11-25.)
 4. The limit entry.
 
 Every leg carries a deterministic client order id (``<ticket>-s/-t/-e``). A
@@ -344,14 +347,14 @@ class CcxtBroker(Broker):
                 "stop",
                 lambda: exchange.create_order(
                     symbol, "market", exit_side, qty, None,
-                    {"stopLossPrice": stop, "closePosition": True, "clientOrderId": ids["stop"]},
+                    {"stopLossPrice": stop, "reduceOnly": True, "clientOrderId": ids["stop"]},
                 ),
             ),
             (
                 "take_profit",
                 lambda: exchange.create_order(
                     symbol, "market", exit_side, qty, None,
-                    {"takeProfitPrice": take_profit, "closePosition": True, "clientOrderId": ids["take_profit"]},
+                    {"takeProfitPrice": take_profit, "reduceOnly": True, "clientOrderId": ids["take_profit"]},
                 ),
             ),
             (
@@ -391,7 +394,7 @@ class CcxtBroker(Broker):
                 qty=qty,
                 price=prices[role],
                 status=str(by_role[role].get("status") or "open"),
-                note="closePosition" if role != "entry" else "",
+                note="reduce-only" if role != "entry" else "",
             )
             for role in ("entry", "stop", "take_profit")
         ]

@@ -201,8 +201,11 @@ def test_protective_legs_exist_before_the_entry():
     stop, take_profit, entry = fake.created()
     assert [stop[1], take_profit[1], entry[1]] == ["stop", "take_profit", "entry"]
     ids = client_order_ids("t-ccxt01")
-    assert stop[7] == {"stopLossPrice": 98.0, "closePosition": True, "clientOrderId": ids["stop"]}
-    assert take_profit[7] == {"takeProfitPrice": 106.0, "closePosition": True, "clientOrderId": ids["take_profit"]}
+    # Binance refuses closePosition legs without a position (-4509); reduce-only legs with the
+    # ticket quantity are accepted (verified on Demo Trading) and can never flip the position.
+    assert stop[5] == 1.234 and stop[7] == {"stopLossPrice": 98.0, "reduceOnly": True, "clientOrderId": ids["stop"]}
+    assert take_profit[5] == 1.234
+    assert take_profit[7] == {"takeProfitPrice": 106.0, "reduceOnly": True, "clientOrderId": ids["take_profit"]}
     assert entry[3:7] == ("limit", "buy", 1.234, 100.0) and entry[7] == {"clientOrderId": ids["entry"]}
     assert [(r.role, r.id) for r in results] == [
         ("entry", ids["entry"]), ("stop", ids["stop"]), ("take_profit", ids["take_profit"])

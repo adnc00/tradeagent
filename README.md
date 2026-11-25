@@ -77,7 +77,7 @@ Bu araç için açacağınız her anahtarda şunlara uyun:
 
 | Piyasa | Veri | Paper | Canlı emir |
 |---|---|---|---|
-| Binance USDⓈ-M futures (`binanceusdm`) | ccxt | evet (yerel ve demo trading) | **evet**: önce `closePosition` stop-market ve take-profit-market, sonra limit giriş (giriş hiçbir an stopsuz kalmaz) |
+| Binance USDⓈ-M futures (`binanceusdm`) | ccxt | evet (yerel ve demo trading) | **evet**: önce reduce-only stop-market ve take-profit-market (bilet miktarıyla), sonra limit giriş (giriş hiçbir an stopsuz kalmaz) |
 | Binance spot, BtcTurk, Kraken, Coinbase (spot) | ccxt | evet (yerel) | **hayır, reddedilir** (ayrıntı aşağıda) |
 | ABD hisseleri | yfinance (tarama), Alpaca | evet (yerel ve Alpaca paper) | evet: Alpaca'nın kendi bracket emri |
 | BIST (`.IS`) | yfinance (gecikmeli) | evet (yerel) | hayır |
@@ -215,7 +215,7 @@ Tarama, mumu kapanmış veriyle yapılır; son mum oluşmaya devam ettiği için
 
 ## Bilinen sınırlamalar
 
-- Futures koruyucu emirleri `closePosition` kullanır ve sembolün tüm pozisyonunu kapatır. Bu yüzden aynı sembolde aynı anda tek bilet çalışır; o sembolde açık pozisyon veya emir varken yeni bilet reddedilir. Hedef veya stop dolduktan sonra kalan bacak, bir sonraki `positions`/`execute`/`scan` çalıştırmasında bilet kimliğiyle bulunup iptal edilir.
+- Futures koruyucu emirleri reduce-only'dir (yalnızca pozisyonu küçültür, asla yeni pozisyon açmaz). Binance `closePosition` emirlerini pozisyon yokken reddettiği için (hata -4509) bu yol seçildi. Aynı sembolde aynı anda tek bilet çalışır; o sembolde açık pozisyon veya emir varken yeni bilet reddedilir. Hedef veya stop dolduktan sonra kalan bacak, bir sonraki `positions`/`execute`/`scan` çalıştırmasında bilet kimliğiyle bulunup iptal edilir.
 - Canlı connector'lar yalnızca sahte borsa nesneleriyle test edildi; demo ortamında önce küçük miktarla deneyin.
 - Kripto için günlük bias ve PDH/PDL, borsanın UTC günlük mumlarıyla hesaplanır (New York gece yarısı değil).
 

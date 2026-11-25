@@ -9,6 +9,7 @@ Biçim [Keep a Changelog](https://keepachangelog.com/tr-TR/1.1.0/), sürümler [
 
 ### Eklendi
 - Dolmayan girişlerin süresi: `execution.entry_expiry_minutes` (120 dk) içinde dolmayan ya da fiyat önce hedef 1'e ulaştığı için anlamını yitiren girişler `watch` tarafından iptal edilir ve bildirilir. Giriş iptal sırasında dolmuşsa koruyucu emirler yerinde bırakılır.
+- Futures stop ve take-profit emirleri artık reduce-only ve bilet miktarıyla gönderilir: Binance, `closePosition` emirlerini açık pozisyon yokken reddediyordu (-4509), bu yüzden demo hesapta hiçbir bilet gönderilemiyordu (giriş de gönderilmedi; korumasız pozisyon oluşmadı).
 - Saat farkı telafisi (Binance -1021), `check --live` saat kontrolü, Telegram hatalarında API açıklaması, satır tamponlu kayıt.
 
 ## [0.3.0] - 2026-11-25
