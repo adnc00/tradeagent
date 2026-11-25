@@ -81,6 +81,7 @@ class FakeExchange:
             "id": f"x{len(self.calls)}", "clientOrderId": params.get("clientOrderId"), "symbol": symbol,
             "status": "open", "type": type, "side": side, "amount": amount, "price": price,
             "trigger": role in ("stop", "take_profit"),
+            "reduceOnly": bool(params.get("reduceOnly") or params.get("closePosition")),
         }
         if effect == "interrupt":
             raise KeyboardInterrupt

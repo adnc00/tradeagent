@@ -2,6 +2,17 @@
 
 Biçim [Keep a Changelog](https://keepachangelog.com/tr-TR/1.1.0/), sürümler [SemVer](https://semver.org/lang/tr/).
 
+## [0.9.0] - 2026-11-26
+
+### Eklendi
+- Panelde **Borsadaki pozisyonlar**: borsadaki tüm pozisyonlar (ajanın, panelden ya da Binance ekranından açılmış) anlık fiyat, K/Z, kaldıraç, likidasyon, stop ve hedefle; **Kapat**, **Yarısını kapat** (reduce-only piyasa emri) ve **Stop/Hedef** (yeni koruma önce konur, sonra eskisi iptal edilir). Stop'u olmayan pozisyon kırmızı "Stop yok" ile işaretlenir. Gerçek para hesabında bu işlemler `ONAY` ister.
+- Onay, kapatma ve stop/hedef pencerelerinde mum grafiği (5m/15m/1h/4h) ve giriş, stop, hedef, likidasyon çizgileri.
+- `watch`, pozisyonu kalmamış sembollerdeki artık reduce-only emirleri temizler.
+
+### Düzeltildi
+- "Fiyat girişe gelmeden hedefe ulaştı" iptali, emir gönderilmeden önceki fiyat hareketini de sayıyordu (gönderimden önce açılmış 5 dakikalık mum); artık yalnızca gönderimden sonra açılan 1 dakikalık mumlar sayılır.
+- Panel önizlemesi ~14 sn sürüyordu: borsa bağlantısı panel boyunca tutulur ve önizlemede her biletin borsa eşitlemesi atlanır (açık risk yalnızca fazla sayılabilir).
+
 ## [0.8.0] - 2026-11-26
 
 ### Eklendi

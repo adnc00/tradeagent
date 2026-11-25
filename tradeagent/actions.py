@@ -69,9 +69,35 @@ def _load(journal: Journal, ticket_id: object, *, status: str) -> OrderTicket:
     return ticket
 
 
+# One connection per account for the panel's lifetime: rebuilding a ccxt client reloads ~1000
+# markets and made every preview take ~15 s. Paper brokers are rebuilt (their state is a file).
+_BROKERS: dict[tuple, Any] = {}
+
+
+def _broker(cfg, symbol: str, live: bool):
+    from tradeagent.brokers.data import asset_class
+    from tradeagent.brokers.paper import PaperBroker
+
+    key = (str(cfg.source), cli.live_enabled(cfg, live), asset_class(symbol) if cli.live_enabled(cfg, live) else "paper")
+    cached = _BROKERS.get(key)
+    if cached is not None:
+        return cached
+    broker = cli.make_broker(cfg, symbol, live)
+    if not isinstance(broker, PaperBroker):
+        _BROKERS[key] = broker
+    return broker
+
+
+def _account_brokers(cfg, live: bool) -> list:
+    key = (str(cfg.source), cli.live_enabled(cfg, live), "account")
+    if key not in _BROKERS:
+        _BROKERS[key] = cli.account_brokers(cfg, live)
+    return _BROKERS[key]
+
+
 def _prepared(cfg, live: bool, journal: Journal, ticket: OrderTicket):
-    broker = cli.make_broker(cfg, ticket.symbol, live)
-    prepared, state, reasons = cli.prepare_ticket(ticket, broker, journal, cfg)
+    broker = _broker(cfg, ticket.symbol, live)
+    prepared, state, reasons = cli.prepare_ticket(ticket, broker, journal, cfg, quick=True)
     return broker, prepared, state, reasons
 
 
@@ -118,7 +144,7 @@ def execute(cfg, live: bool, body: dict[str, Any]) -> dict[str, Any]:
             raise ActionError(409, "Kontroller emri reddetti; hiçbir emir gönderilmedi.", {"reasons": reasons})
         journal.add_ticket_note(ticket.id, f"panelden onaylandı ({cli.CONFIRM_WORD} yazıldı)")
         mode = "live" if cli.live_enabled(cfg, live) else "paper"
-        outcome = cli.send_confirmed(prepared, broker, journal, cfg, mode)
+        outcome = cli.send_confirmed(prepared, broker, journal, cfg, mode, quick=True)
         result = {"status": outcome.status, "lines": outcome.lines, "orders": _orders(outcome.orders)}
         if outcome.status == "sent":
             return result
@@ -142,7 +168,7 @@ def cancel(cfg, live: bool, body: dict[str, Any]) -> dict[str, Any]:
     journal = Journal(cfg.journal_path)
     try:
         ticket = _load(journal, body.get("ticket_id"), status="submitted")
-        broker = cli.make_broker(cfg, ticket.symbol, live)
+        broker = _broker(cfg, ticket.symbol, live)
         outcome = broker.cancel_entry(ticket)
         if outcome is None:
             raise ActionError(501, f"{broker.name} için girişi tek başına iptal etme desteklenmiyor; borsadan iptal edin.")
@@ -158,7 +184,7 @@ def cancel(cfg, live: bool, body: dict[str, Any]) -> dict[str, Any]:
 def kill(cfg, live: bool, body: dict[str, Any]) -> dict[str, Any]:
     _require_confirmation(body.get("confirm"))
     enabled = cli.live_enabled(cfg, live)
-    brokers = cli.account_brokers(cfg, live)
+    brokers = _account_brokers(cfg, live)
     if not brokers:
         raise ActionError(503, "Kullanılabilir hesap yok (API anahtarlarını .env'de tanımlayın).")
     journal = Journal(cfg.journal_path)
@@ -274,12 +300,108 @@ def manual(cfg, live: bool, body: dict[str, Any]) -> dict[str, Any]:
 
 def price(cfg, live: bool, body: dict[str, Any]) -> dict[str, Any]:
     symbol = _symbol(body)
-    broker = cli.make_broker(cfg, symbol, live)
+    broker = _broker(cfg, symbol, live)
     value = cli.current_price(broker, cfg, symbol)
     if value is None:
         raise ActionError(502, f"{symbol} için fiyat alınamadı.")
     return {"symbol": symbol, "price": value, "market": market_type(symbol, cfg.crypto.exchange),
             "risk_pct": cfg.risk.risk_pct, "max_risk_pct": cfg.risk.max_risk_pct, "max_leverage": cfg.risk.max_leverage}
+
+
+# --- positions on the venue ---------------------------------------------------------------------------------
+
+
+def positions(cfg, live: bool, body: dict[str, Any]) -> dict[str, Any]:
+    """Every open position of the panel's account(s), with its protective orders and its ticket."""
+    journal = Journal(cfg.journal_path)
+    out = []
+    try:
+        for broker in _account_brokers(cfg, live):
+            tickets = {t.symbol: t.id for t in journal.open_tickets(broker.name)}
+            for p in broker.get_positions():
+                stop, take_profit = p.stop, p.take_profit
+                if stop is None or take_profit is None:
+                    for order in broker.get_open_orders(p.symbol):
+                        if order.role == "stop" and stop is None:
+                            stop = order.price
+                        elif order.role == "take_profit" and take_profit is None:
+                            take_profit = order.price
+                out.append({
+                    "broker": broker.name, "environment": broker.environment,
+                    "real_money": not getattr(broker, "is_demo", False),
+                    "symbol": p.symbol, "side": p.side.value, "qty": p.qty, "entry": p.entry_price,
+                    "mark": p.mark_price, "unrealized_pnl": p.unrealized_pnl, "leverage": p.leverage,
+                    "liquidation": p.liquidation, "stop": stop, "take_profit": take_profit,
+                    "ticket": tickets.get(p.symbol), "currency": cli.quote_currency(p.symbol),
+                })
+    finally:
+        journal.close()
+    return {"positions": out}
+
+
+def _holder(cfg, live: bool, symbol: str):
+    for broker in _account_brokers(cfg, live):
+        if any(p.symbol == symbol for p in broker.get_positions()):
+            return broker
+    raise ActionError(404, f"{symbol} için açık pozisyon yok.")
+
+
+def _require_word_for_real_money(broker, body: dict[str, Any]) -> None:
+    if not getattr(broker, "is_demo", False) and body.get("confirm") != cli.CONFIRM_WORD:
+        raise ActionError(400, f"Gerçek para hesabında bu işlem için tam olarak {cli.CONFIRM_WORD} yazın.")
+
+
+def close(cfg, live: bool, body: dict[str, Any]) -> dict[str, Any]:
+    symbol = _symbol(body)
+    try:
+        fraction = float(body.get("fraction", 1.0))
+    except (TypeError, ValueError):
+        raise ActionError(400, "Kapatılacak oran bir sayı olmalı (ör. 0.5 = yarısı).") from None
+    if not (math.isfinite(fraction) and 0 < fraction <= 1):
+        raise ActionError(400, "Kapatılacak oran 0'dan büyük ve en fazla 1 olmalı.")
+    broker = _holder(cfg, live, symbol)
+    _require_word_for_real_money(broker, body)
+    closer = getattr(broker, "close_position", None)
+    if closer is None:
+        raise ActionError(501, f"{broker.name} için tek pozisyon kapatma desteklenmiyor; Acil durdur'u kullanın.")
+    try:
+        result = closer(symbol, fraction)
+    except cli.BrokerError as exc:
+        raise ActionError(409, str(exc)) from None
+    return {"status": result.status, "qty": result.qty, "symbol": symbol, "fraction": fraction}
+
+
+def protect(cfg, live: bool, body: dict[str, Any]) -> dict[str, Any]:
+    symbol = _symbol(body)
+    levels = {}
+    for key, label in (("stop", "Stop"), ("take_profit", "Hedef")):
+        levels[key] = None if body.get(key) in (None, "") else _number(body, key, label)
+    broker = _holder(cfg, live, symbol)
+    _require_word_for_real_money(broker, body)
+    setter = getattr(broker, "set_protection", None)
+    if setter is None:
+        raise ActionError(501, f"{broker.name} için stop/hedef değiştirme desteklenmiyor.")
+    try:
+        legs = setter(symbol, stop=levels["stop"], take_profit=levels["take_profit"])
+    except cli.BrokerError as exc:
+        raise ActionError(409, str(exc)) from None
+    return {"orders": _orders(legs)}
+
+
+def candles(cfg, live: bool, body: dict[str, Any]) -> dict[str, Any]:
+    symbol = _symbol(body)
+    timeframe = str(body.get("timeframe") or "15m")
+    if timeframe not in cli._TIMEFRAMES:
+        raise ActionError(400, "Zaman dilimi geçersiz.")
+    try:
+        frame = cli.MarketData(cfg.crypto.exchange).get_ohlcv(symbol, timeframe, 120)
+    except Exception as exc:
+        raise ActionError(502, f"{symbol} mum verisi alınamadı ({exc}).") from None
+    rows = [
+        [int(ts.timestamp() * 1000), float(r.open), float(r.high), float(r.low), float(r.close)]
+        for ts, r in frame.tail(120).iterrows()
+    ]
+    return {"symbol": symbol, "timeframe": timeframe, "candles": rows}
 
 
 ACTIONS = {
@@ -291,4 +413,8 @@ ACTIONS = {
     "/api/modify": modify,
     "/api/manual": manual,
     "/api/price": price,
+    "/api/positions": positions,
+    "/api/close": close,
+    "/api/protect": protect,
+    "/api/candles": candles,
 }

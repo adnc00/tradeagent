@@ -196,6 +196,8 @@ tradeagent panel --live     # işlemler config'deki canlı/demo hesaba (ayrıca 
 - **Onay bekleyenler:** geçerlilik süresi dolmamış her bilet burada. "İncele ve onayla" bileti gönderilecek hâliyle gösterir (borsaya göre yuvarlanmış fiyatlar, hesaba göre yeniden hesaplanmış miktar, risk tutarı ve yüzdesi, hedefte kazanç, likidasyon, hesap). Bir kontrol bileti reddederse nedenleri yazılır ve gönder butonu kapalı kalır. Göndermek için kutuya tam olarak `ONAY` yazılır. Sunucu gönderimden hemen önce risk motorunu ve bayat bilet kontrolünü yeniden çalıştırır. "Reddet" bileti göndermeden kapatır.
 - **Düzenle:** onay penceresinde giriş, stop, hedef, risk % ve kaldıraç değiştirilip "Değişiklikleri uygula" ile yeniden hesaplanır. Düzenlenen bilet sonraki taramalarda üzerine yazılmaz.
 - **Yeni işlem:** kendi long/short işleminizi tanımlayın (sembol, yön, giriş, stop, hedef, risk %, kaldıraç); aynı önizleme ve `ONAY` akışından geçer. Adım adım: [docs/ELLE-ISLEM.md](docs/ELLE-ISLEM.md).
+- **Borsadaki pozisyonlar:** borsadaki tüm açık pozisyonlar (ajanın ya da elle açılmış) anlık K/Z, kaldıraç, likidasyon, stop ve hedefle. **Kapat** / **Yarısını kapat** reduce-only piyasa emri gönderir; **Stop/Hedef** yeni korumayı önce koyar, sonra eskisini iptal eder. Stop'u olmayan pozisyon kırmızıyla işaretlenir.
+- **Grafik:** onay, kapatma ve stop/hedef pencerelerinde mum grafiği ve seviye çizgileri.
 - **Girişi iptal et:** gönderilmiş ama dolmamış girişi, stop ve hedefiyle birlikte iptal eder. Giriş o arada dolduysa pozisyon ve koruması olduğu gibi kalır.
 - **Acil durdur:** tüm pozisyonları piyasa emriyle kapatır, kapandığı doğrulanan sembollerin emirlerini iptal eder (`ONAY` ister; `tradeagent kill` ile aynı).
 

@@ -117,8 +117,8 @@ def test_entry_is_cancelled_when_price_reached_target_first(config_path, monkeyp
 
     def spiked(self, symbol, timeframe, limit=500):
         df = original(self, symbol, timeframe, limit).copy()
-        if timeframe == "5m":
-            df.index = pd.date_range(end=pd.Timestamp.now(tz="UTC"), periods=len(df), freq="5min")
+        if timeframe == "1m":
+            df.index = pd.date_range(end=pd.Timestamp.now(tz="UTC"), periods=len(df), freq="1min")
             df.iloc[-1, df.columns.get_loc("high")] = 110.0
         return df
 

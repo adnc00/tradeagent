@@ -30,6 +30,7 @@ says exactly what could and could not be cancelled.
 """
 
 import os
+import time
 from datetime import UTC, datetime
 from collections.abc import Callable, Iterable, Mapping
 from decimal import ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP, Decimal
@@ -223,9 +224,94 @@ class CcxtBroker(Broker):
                     qty=contracts * float(raw.get("contractSize") or 1.0),
                     entry_price=float(raw["entryPrice"]) if raw.get("entryPrice") is not None else None,
                     unrealized_pnl=float(raw["unrealizedPnl"]) if raw.get("unrealizedPnl") is not None else None,
+                    leverage=float(raw["leverage"]) if raw.get("leverage") is not None else None,
+                    liquidation=float(raw["liquidationPrice"]) if raw.get("liquidationPrice") else None,
+                    mark_price=float(raw["markPrice"]) if raw.get("markPrice") is not None else None,
                 )
             )
         return positions
+
+    def _position(self, symbol: str) -> Position:
+        for position in self.get_positions():
+            if position.symbol == symbol:
+                return position
+        raise BrokerError(f"{symbol} için açık pozisyon yok.")
+
+    def close_position(self, symbol: str, fraction: float) -> OrderResult:
+        """Reduce-only market close of ``fraction`` (0-1] of the position; a full close also
+        cancels the symbol's leftover orders once the position is flat."""
+        if not 0 < fraction <= 1:
+            raise BrokerError("Kapatılacak oran 0 ile 1 arasında olmalı.")
+        position = self._position(symbol)
+        qty = position.qty if fraction >= 1 else self.normalize_qty(symbol, position.qty * fraction)
+        if qty <= 0:
+            raise BrokerError("Kapatılacak miktar borsanın en küçük miktarının altında.")
+        side = position.side.exit_action
+        params = {"positionSide": position.side.value.upper()} if self._is_hedge_mode(symbol) else {"reduceOnly": True}
+        try:
+            raw = self._exchange.create_order(symbol, "market", side, qty, None, params)
+        except ccxt.BaseError as exc:
+            raise BrokerError(f"{symbol} kapatılamadı: {exc}") from exc
+        if fraction >= 1 and not any(p.symbol == symbol for p in self.get_positions()):
+            self.cancel_orders(symbol)
+        return OrderResult(
+            id=str(raw.get("id")), symbol=symbol, side=side, role="close", type="market", qty=qty, price=None,
+            status=str(raw.get("status") or "open"),
+        )
+
+    def set_protection(self, symbol: str, *, stop: float | None, take_profit: float | None) -> list[OrderResult]:
+        """Put a reduce-only stop and/or take-profit on an open position. The new legs are placed
+        before the old ones of the same role are cancelled, so the position is never unprotected."""
+        position = self._position(symbol)
+        if stop is None and take_profit is None:
+            raise BrokerError("Stop ya da hedeften en az biri gerekli.")
+        reference = position.mark_price or self.get_price(symbol)
+        sign = position.side.sign
+        if stop is not None and (reference - stop) * sign <= 0:
+            raise BrokerError(f"Stop ({stop}) güncel fiyatın ({reference}) {'altında' if sign > 0 else 'üstünde'} olmalı.")
+        if take_profit is not None and (take_profit - reference) * sign <= 0:
+            raise BrokerError(f"Hedef ({take_profit}) güncel fiyatın ({reference}) {'üstünde' if sign > 0 else 'altında'} olmalı.")
+        exit_side = position.side.exit_action
+        stamp = f"p{int(time.time() * 1000) % 10**12}"
+        placed: list[tuple[str, dict[str, Any]]] = []
+        for role, level, key in (("stop", stop, "stopLossPrice"), ("take_profit", take_profit, "takeProfitPrice")):
+            if level is None:
+                continue
+            params = {key: level, "reduceOnly": True, "clientOrderId": f"{stamp}-{_LEG_SUFFIX[role]}"}
+            try:
+                raw = self._exchange.create_order(symbol, "market", exit_side, position.qty, None, params)
+            except ccxt.BaseError as exc:
+                raise BrokerError(f"{role} konamadı ({exc}); eski koruma yerinde bırakıldı.") from exc
+            placed.append((role, raw))
+        new_ids = {str(raw.get("id")) for _, raw in placed}
+        roles = {role for role, _ in placed}
+        for raw, conditional in self._raw_open_orders(symbol):
+            if not conditional or str(raw.get("id")) in new_ids:
+                continue
+            if _role_of(raw) in roles:
+                self._cancel_leg(symbol, _role_of(raw), raw)
+        return [
+            OrderResult(id=str(raw.get("clientOrderId") or raw.get("id")), symbol=symbol, side=exit_side, role=role,
+                        type="market", qty=position.qty, price=raw.get("stopPrice") or raw.get("triggerPrice"),
+                        status=str(raw.get("status") or "open"), note="reduce-only")
+            for role, raw in placed
+        ]
+
+    def cancel_orphans(self) -> list[str]:
+        """Cancel reduce-only orders left on symbols that hold no position and no pending entry."""
+        held = {p.symbol for p in self.get_positions()}
+        by_symbol: dict[str, list[dict[str, Any]]] = {}
+        for raw, _ in self._raw_open_orders(None):
+            if raw.get("symbol"):
+                by_symbol.setdefault(str(raw["symbol"]), []).append(raw)
+        cleaned = []
+        for symbol, orders in sorted(by_symbol.items()):
+            if symbol in held:
+                continue
+            if all(raw.get("reduceOnly") or raw.get("closePosition") for raw in orders):
+                self.cancel_orders(symbol)
+                cleaned.append(symbol)
+        return cleaned
 
     def _raw_open_orders(self, symbol: str | None) -> list[tuple[dict[str, Any], bool]]:
         """(order, is_conditional) for regular and conditional (algo) orders."""

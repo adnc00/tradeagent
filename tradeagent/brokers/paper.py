@@ -383,6 +383,19 @@ class PaperBroker(Broker):
                 return "filled" if bracket.status in ("open", "closed") else "canceled"
         return None
 
+    def close_position(self, symbol: str, fraction: float) -> OrderResult:
+        """Close the simulated position on ``symbol`` at the last price (only whole positions)."""
+        if fraction < 1.0:
+            raise BrokerError("Paper hesapta yalnızca pozisyonun tamamı kapatılabilir.")
+        now = self._clock()
+        with self._transaction():
+            for b in self._brackets:
+                if b.status == "open" and b.symbol == symbol:
+                    price, note = self._close_price(b)
+                    self._exit(b, price, "close", now)
+                    return OrderResult(f"{b.id}-close", b.symbol, b.side.exit_action, "close", "market", b.qty, price, "filled", note)
+        raise BrokerError(f"{symbol} için açık pozisyon yok.")
+
     def close_all(self) -> list[OrderResult]:
         now = self._clock()
         results: list[OrderResult] = []

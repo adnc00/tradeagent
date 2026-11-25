@@ -298,8 +298,13 @@ def sizing_equity(broker: Broker, journal: Journal, goal, real_equity: float) ->
     return min(real_equity, virtual), f"{broker.name}#sanal"
 
 
-def account_state(broker: Broker, journal: Journal, exclude: str | None = None, goal=None) -> AccountState:
-    refresh(broker, journal)
+def account_state(
+    broker: Broker, journal: Journal, exclude: str | None = None, goal=None, *, quick: bool = False
+) -> AccountState:
+    """Equity, loss baselines and open risk. ``quick`` skips the per-ticket venue reconciliation
+    (open risk can then only be over-counted, never under-counted)."""
+    if not (quick and not isinstance(broker, PaperBroker)):
+        refresh(broker, journal)
     equity, key = sizing_equity(broker, journal, goal, broker.get_balance().equity)
     day_start, week_start = journal.equity_baselines(key, equity)
     open_risks = tuple(
@@ -374,10 +379,10 @@ def stale_reasons(ticket: OrderTicket, price: float | None, cfg: Config, now: da
 
 
 def prepare_ticket(
-    ticket: OrderTicket, broker: Broker, journal: Journal, cfg: Config
+    ticket: OrderTicket, broker: Broker, journal: Journal, cfg: Config, *, quick: bool = False
 ) -> tuple[OrderTicket, AccountState, list[str]]:
     """Venue-rounded, re-sized ticket plus every reason it must not be sent."""
-    state = account_state(broker, journal, goal=cfg.goal)
+    state = account_state(broker, journal, goal=cfg.goal, quick=quick)
     prepared = replace(ticket, market=broker.market_type(ticket.symbol, ticket.market))
     if prepared.stop is not None and prepared.targets:
         entry, stop, targets = broker.normalize_prices(
@@ -392,9 +397,11 @@ def prepare_ticket(
     return prepared, state, reasons
 
 
-def recheck_after_confirmation(ticket: OrderTicket, broker: Broker, journal: Journal, cfg: Config) -> list[str]:
+def recheck_after_confirmation(
+    ticket: OrderTicket, broker: Broker, journal: Journal, cfg: Config, *, quick: bool = False
+) -> list[str]:
     """Risk engine and stale-ticket guard on exactly the confirmed ticket, with fresh account state."""
-    state = account_state(broker, journal, exclude=ticket.id, goal=cfg.goal)
+    state = account_state(broker, journal, exclude=ticket.id, goal=cfg.goal, quick=quick)
     reasons = [v.message for v in check_ticket(ticket, state, cfg.risk)]
     reasons.extend(stale_reasons(ticket, current_price(broker, cfg, ticket.symbol), cfg, datetime.now(UTC)))
     return reasons
@@ -644,13 +651,15 @@ class SendOutcome:
     equity: float | None = None
 
 
-def send_confirmed(prepared: OrderTicket, broker: Broker, journal: Journal, cfg: Config, mode: str) -> SendOutcome:
+def send_confirmed(
+    prepared: OrderTicket, broker: Broker, journal: Journal, cfg: Config, mode: str, *, quick: bool = False
+) -> SendOutcome:
     """Claim, re-check and send an already approved ticket. Never asks for anything."""
     if not journal.claim_for_submission(prepared.id, broker=broker.name, mode=mode):
         return SendOutcome(
             "busy", EXIT_ABORTED, ["Bilet başka bir işlem tarafından gönderiliyor ya da gönderildi. Emir GÖNDERİLMEDİ."]
         )
-    reasons = recheck_after_confirmation(prepared, broker, journal, cfg)
+    reasons = recheck_after_confirmation(prepared, broker, journal, cfg, quick=quick)
     if reasons:
         journal.release_claim(prepared.id, "onay sonrası kontrol reddetti: " + " | ".join(reasons))
         return SendOutcome(
@@ -977,15 +986,16 @@ def _order_lines(orders: list[OrderResult]) -> list[str]:
 
 
 def _target_touched(ticket: OrderTicket, since: datetime, data) -> bool:
-    """Whether price reached target 1 after ``since`` (5m candles); unknown data counts as no."""
+    """Whether price reached target 1 after ``since`` (1m candles that opened after the order was
+    sent, so price action from before the entry existed never counts); unknown data counts as no."""
     target = ticket.take_profit
     if target is None:
         return False
     try:
-        candles = data.get_ohlcv(ticket.symbol, "5m", 300)
+        candles = data.get_ohlcv(ticket.symbol, "1m", 1000)
     except Exception:
         return False
-    recent = candles[candles.index + pd.Timedelta(minutes=5) > pd.Timestamp(since)]
+    recent = candles[candles.index >= pd.Timestamp(since)]
     if recent.empty:
         return False
     if ticket.side.value == "long":
@@ -1100,6 +1110,13 @@ def watch_cycle(args: argparse.Namespace, cfg: Config, journal: Journal, channel
         refresh(broker, journal)
         mark_filled(broker, journal)
         record_equity(broker, journal, cfg.goal)
+        cleaner = getattr(broker, "cancel_orphans", None)
+        if cleaner is not None:
+            try:
+                for symbol in cleaner():
+                    print(f"  {symbol}: pozisyonu kalmayan koruyucu emirler iptal edildi")
+            except Exception as exc:  # housekeeping only
+                print(f"Uyarı: artık emir temizliği yapılamadı ({exc}).")
         for ticket_id in backfill_results(broker, journal):
             print(f"  [{ticket_id}] sonuç borsa işlemlerinden kaydedildi")
     brokers.setdefault("paper", paper_broker(cfg))

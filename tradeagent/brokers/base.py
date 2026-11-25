@@ -42,6 +42,9 @@ class Position:
     take_profit: float | None = None
     unrealized_pnl: float | None = None
     ticket_id: str | None = None
+    leverage: float | None = None
+    liquidation: float | None = None
+    mark_price: float | None = None
 
 
 @dataclass(frozen=True, slots=True)

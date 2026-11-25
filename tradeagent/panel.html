@@ -147,6 +147,22 @@ footer { color: var(--faint); font-size: var(--fs-small); display: flex; justify
 .account .btn { margin-left: 4px; }
 .real { color: var(--negative); font-weight: 600; }
 
+/* venue positions */
+.pnl-pos { color: var(--positive); }
+.pnl-neg { color: var(--negative); }
+.row-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.warn-pill { display: inline-block; font-size: 12px; line-height: 20px; padding: 0 8px; border-radius: 999px; background: var(--pill-negative-bg); color: var(--pill-negative-ink); }
+
+/* chart in dialogs */
+.chart-box { background: var(--ground); border-radius: 14px; padding: 8px 6px 4px; }
+.chart-box svg { width: 100%; height: 240px; display: block; }
+.chart-box svg text { fill: var(--faint); font: 400 11px var(--font); font-variant-numeric: tabular-nums; }
+.chart-tf { display: flex; gap: 6px; justify-content: flex-end; padding: 0 6px 4px; }
+.chart-tf button { height: 24px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--control); background: transparent; color: var(--muted); font: 500 12px var(--font); cursor: pointer; }
+.chart-tf button[aria-pressed="true"] { background: var(--text); color: #000; border-color: var(--text); }
+.dlg-cols { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (max-width: 860px) { .dlg-cols { grid-template-columns: 1fr; } }
+
 /* goal */
 .goal { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 8px 32px; align-items: end; }
 .goal-figure output { display: block; font-size: 32px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; font-variant-numeric: tabular-nums; }
@@ -162,7 +178,7 @@ footer { color: var(--faint); font-size: var(--fs-small); display: flex; justify
 .await-row td { vertical-align: middle; }
 
 /* dialog */
-dialog { border: 0; padding: 0; border-radius: var(--radius-card); background: var(--surface); color: var(--text); width: min(560px, calc(100vw - 32px)); box-shadow: 0 24px 64px rgba(0,0,0,.6); }
+dialog { border: 0; padding: 0; border-radius: var(--radius-card); background: var(--surface); color: var(--text); width: min(920px, calc(100vw - 32px)); max-height: calc(100vh - 32px); box-shadow: 0 24px 64px rgba(0,0,0,.6); }
 dialog::backdrop { background: rgba(0,0,0,.62); }
 .dlg { padding: 24px; display: grid; gap: 16px; }
 .dlg h2 { font-size: 18px; }
@@ -234,7 +250,8 @@ dialog::backdrop { background: rgba(0,0,0,.62); }
       <a href="#ozet" aria-current="true">Genel bakış</a>
       <a href="#hedef">Hedef</a>
       <a href="#onay">Onay bekleyenler</a>
-      <a href="#pozisyonlar">Pozisyonlar</a>
+      <a href="#borsa">Borsadaki pozisyonlar</a>
+      <a href="#pozisyonlar">Ajanın biletleri</a>
       <a href="#bildirimler">Bildirimler</a>
       <a href="#biletler">Biletler</a>
     </nav>
@@ -304,8 +321,13 @@ dialog::backdrop { background: rgba(0,0,0,.62); }
       </section>
     </div>
 
+    <section class="card" id="borsa" aria-labelledby="h-venue">
+      <div class="card-head"><h2 id="h-venue">Borsadaki pozisyonlar</h2><span id="venue-note">yükleniyor…</span></div>
+      <div class="table-wrap" id="venue-wrap"></div>
+    </section>
+
     <section class="card" id="pozisyonlar" aria-labelledby="h-pos">
-      <div class="card-head"><h2 id="h-pos">Açık pozisyonlar ve bekleyen emirler</h2><span id="pos-count">-</span></div>
+      <div class="card-head"><h2 id="h-pos">Ajanın biletleri: bekleyen ve açık</h2><span id="pos-count">-</span></div>
       <div class="table-wrap" id="pos-wrap"></div>
     </section>
 
@@ -324,7 +346,15 @@ dialog::backdrop { background: rgba(0,0,0,.62); }
       <form class="dlg" method="dialog" id="dlg-form">
         <h2 id="dlg-title">-</h2>
         <p class="lead" id="dlg-lead"></p>
-        <dl class="facts" id="dlg-facts"></dl>
+        <div class="dlg-cols" id="dlg-cols">
+          <div id="dlg-left">
+            <div class="chart-box" id="dlg-chart" hidden>
+              <div class="chart-tf" id="dlg-tf"></div>
+              <svg id="dlg-svg" role="img" aria-label="Mum grafiği"></svg>
+            </div>
+          </div>
+          <dl class="facts" id="dlg-facts"></dl>
+        </div>
         <ul class="reasons" id="dlg-reasons" hidden></ul>
         <div class="fields" id="dlg-fields" hidden></div>
         <div class="confirm-field" id="dlg-confirm" hidden>
@@ -521,6 +551,99 @@ function table(cols, rows, emptyText) {
 function sideCell(t) { return el("span", { class: t.side === "long" ? "side-long" : "side-short", text: t.side === "long" ? "Long" : "Short" }); }
 function symbolCell(t) { return el("span", {}, t.symbol, el("br"), el("span", { class: "sub", text: `${t.market} · ${t.timeframe || "-"} · ${t.id}` })); }
 
+let venueRows = [];
+function renderVenue(list, error) {
+  const wrap = $("venue-wrap");
+  wrap.textContent = "";
+  if (error) { $("venue-note").textContent = "okunamadı"; wrap.append(el("p", { class: "empty", text: error })); return; }
+  venueRows = list;
+  const total = list.reduce((a, p) => a + (p.unrealized_pnl || 0), 0);
+  $("venue-note").textContent = list.length ? `${list.length} pozisyon · anlık K/Z ${total >= 0 ? "+" : "−"}${n2.format(Math.abs(total))} USDT` : "açık pozisyon yok";
+  wrap.append(table([
+    { label: "Sembol", get: p => el("span", {}, p.symbol, el("br"), el("span", { class: "sub", text: p.ticket ? "ajan bileti " + p.ticket : "elle / borsadan açıldı" })) },
+    { label: "Yön", get: p => el("span", { class: p.side === "long" ? "side-long" : "side-short", text: p.side === "long" ? "Long" : "Short" }) },
+    { label: "Miktar", r: 1, get: p => price(p.qty) },
+    { label: "Giriş", r: 1, get: p => price(p.entry) },
+    { label: "Anlık", r: 1, get: p => price(p.mark) },
+    { label: "K/Z", r: 1, get: p => p.unrealized_pnl == null ? "-" : el("span", { class: p.unrealized_pnl >= 0 ? "pnl-pos" : "pnl-neg", text: (p.unrealized_pnl >= 0 ? "+" : "−") + n2.format(Math.abs(p.unrealized_pnl)) }) },
+    { label: "Kaldıraç", r: 1, get: p => p.leverage == null ? "-" : p.leverage + "x" },
+    { label: "Likidasyon", r: 1, get: p => price(p.liquidation) },
+    { label: "Stop", r: 1, get: p => p.stop == null ? el("span", { class: "warn-pill", text: "Stop yok" }) : price(p.stop) },
+    { label: "Hedef", r: 1, get: p => price(p.take_profit) },
+    { label: "", r: 1, get: p => el("div", { class: "row-actions" },
+        el("button", { class: "btn small", type: "button", "data-protect": p.symbol, text: "Stop/Hedef" }),
+        el("button", { class: "btn small", type: "button", "data-half": p.symbol, text: "Yarısını kapat" }),
+        el("button", { class: "btn danger small", type: "button", "data-close": p.symbol, text: "Kapat" })) },
+  ], list, "Borsada açık pozisyon yok. Giriş emri dolunca pozisyon burada görünür."));
+}
+let venueBusy = false;
+async function refreshVenue() {
+  if (venueBusy || !lastState || !lastState.account || !lastState.account.live) {
+    if (lastState && lastState.account && !lastState.account.live) renderVenue([], null);
+    return;
+  }
+  venueBusy = true;
+  try {
+    const r = await act("/api/positions", {});
+    if (r.ok) renderVenue(r.data.positions, null); else renderVenue([], r.data.error || "Pozisyonlar okunamadı.");
+  } catch (err) { renderVenue([], "Pozisyonlar okunamadı: " + err); }
+  finally { venueBusy = false; }
+}
+function positionFacts(p) {
+  return [
+    ["Yön", p.side === "long" ? "LONG" : "SHORT"], ["Miktar", price(p.qty)], ["Giriş", price(p.entry)], ["Anlık", price(p.mark)],
+    ["Anlık K/Z", p.unrealized_pnl == null ? "-" : (p.unrealized_pnl >= 0 ? "+" : "−") + n2.format(Math.abs(p.unrealized_pnl)) + " " + p.currency],
+    ["Kaldıraç", p.leverage == null ? "-" : p.leverage + "x"], ["Likidasyon", price(p.liquidation)],
+    ["Stop", p.stop == null ? "YOK" : price(p.stop)], ["Hedef", price(p.take_profit)], ["Hesap", `${p.broker} (${p.environment})`],
+  ];
+}
+function positionLines(p) {
+  return [
+    { price: p.entry, label: "Giriş", color: "#ffffff", dash: "4 3" },
+    { price: p.stop, label: "Stop", color: "#e5484d" },
+    { price: p.take_profit, label: "Hedef", color: "#c6f24e" },
+    { price: p.liquidation, label: "Likid.", color: "#e5a93b", dash: "2 4" },
+  ];
+}
+function closeFlow(symbol, fraction) {
+  const p = venueRows.find(x => x.symbol === symbol);
+  if (!p) return;
+  const part = fraction >= 1 ? "tamamı" : "yarısı";
+  openDialog({
+    title: `${symbol} - ${fraction >= 1 ? "pozisyonu kapat" : "yarısını kapat"}`,
+    lead: `Pozisyonun ${part} piyasa emriyle (reduce-only) kapatılır.` + (fraction >= 1 ? " Kalan stop ve hedef emirleri iptal edilir." : " Stop ve hedef kalan miktar için yerinde kalır.") + (p.real_money ? " GERÇEK PARA: ONAY yazın." : ""),
+    facts: positionFacts(p), needWord: p.real_money, okText: fraction >= 1 ? "Kapat" : "Yarısını kapat", okClass: "danger",
+    onOk: async (word) => {
+      const r = await act("/api/close", { symbol, fraction, confirm: word });
+      refreshVenue();
+      return r.ok ? { message: `Kapatma emri gönderildi (${price(r.data.qty)}).`, tone: "good", done: true } : { message: r.data.error, tone: "bad", done: false };
+    },
+  });
+  showChart(symbol, positionLines(p), "15m");
+}
+function protectFlow(symbol) {
+  const p = venueRows.find(x => x.symbol === symbol);
+  if (!p) return;
+  openDialog({
+    title: `${symbol} - stop ve hedef`,
+    lead: "Yeni stop/hedef önce borsaya konur, sonra eskisi iptal edilir; pozisyon hiçbir an korumasız kalmaz. Boş bırakılan değiştirilmez." + (p.real_money ? " GERÇEK PARA: ONAY yazın." : ""),
+    facts: positionFacts(p),
+    fields: [
+      { key: "stop", label: "Yeni stop", value: p.stop, hint: p.side === "long" ? "Anlık fiyatın altında" : "Anlık fiyatın üstünde" },
+      { key: "take_profit", label: "Yeni hedef", value: p.take_profit, hint: p.side === "long" ? "Anlık fiyatın üstünde" : "Anlık fiyatın altında" },
+    ],
+    needWord: p.real_money, okText: "Uygula", okClass: "primary",
+    onOk: async (word) => {
+      const v = fieldValues();
+      const r = await act("/api/protect", { symbol, stop: v.stop, take_profit: v.take_profit, confirm: word });
+      refreshVenue();
+      return r.ok ? { message: "Stop/hedef borsada güncellendi.", tone: "good", done: true } : { message: r.data.error, tone: "bad", done: false };
+    },
+  });
+  if (!p.real_money) $("dlg-ok").disabled = false;
+  showChart(symbol, positionLines(p), "15m");
+}
+
 function renderPositions(s) {
   const rows = s.open_tickets;
   $("pos-count").textContent = rows.length ? `${rows.length} bilet` : "boş";
@@ -568,6 +691,50 @@ function renderTickets(s) {
   ], s.recent_tickets, "Henüz bilet yok."));
 }
 
+
+/* candle chart with level lines */
+function drawCandles(svg, candles, lines) {
+  const ns = "http://www.w3.org/2000/svg";
+  const W = svg.clientWidth || 480, H = 240, L = 8, R = 64, T = 10, B = 20;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.textContent = "";
+  const add = (tag, attrs, text) => { const n = document.createElementNS(ns, tag); for (const k in attrs) n.setAttribute(k, attrs[k]); if (text != null) n.textContent = text; svg.append(n); return n; };
+  if (!candles.length) { add("text", { x: 12, y: 24 }, "Mum verisi yok."); return; }
+  const prices = candles.flatMap(c => [c[2], c[3]]).concat(lines.map(l => l.price).filter(v => v != null));
+  let lo = Math.min(...prices), hi = Math.max(...prices);
+  const pad = (hi - lo) * 0.06 || hi * 0.01; lo -= pad; hi += pad;
+  const y = v => T + (hi - v) / (hi - lo) * (H - T - B);
+  const step = (W - L - R) / candles.length, body = Math.max(1, step * 0.6);
+  candles.forEach((c, i) => {
+    const [, o, h, l, cl] = c, x = L + i * step + step / 2, up = cl >= o;
+    const color = up ? "#d8d8d8" : "#5a5e64";
+    add("line", { x1: x, x2: x, y1: y(h), y2: y(l), stroke: color, "stroke-width": 1 });
+    add("rect", { x: x - body / 2, y: Math.min(y(o), y(cl)), width: body, height: Math.max(1, Math.abs(y(o) - y(cl))), fill: color });
+  });
+  for (const ln of lines) {
+    if (ln.price == null) continue;
+    add("line", { x1: L, x2: W - R + 4, y1: y(ln.price), y2: y(ln.price), stroke: ln.color, "stroke-width": 1.2, "stroke-dasharray": ln.dash || "" });
+    add("text", { x: W - R + 8, y: y(ln.price) + 4, fill: ln.color }, `${ln.label} ${price(ln.price)}`);
+  }
+  const first = new Date(candles[0][0]), last = new Date(candles[candles.length - 1][0]);
+  const fmt = d => new Intl.DateTimeFormat("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: TZ }).format(d);
+  add("text", { x: L, y: H - 4 }, fmt(first));
+  add("text", { x: W - R, y: H - 4, "text-anchor": "end" }, fmt(last));
+}
+async function showChart(symbol, lines, timeframe) {
+  const box = $("dlg-chart"), tfBox = $("dlg-tf");
+  box.hidden = false;
+  const tf = timeframe || "15m";
+  tfBox.textContent = "";
+  for (const f of ["5m", "15m", "1h", "4h"]) {
+    const b = el("button", { type: "button", "aria-pressed": String(f === tf), text: f });
+    b.addEventListener("click", () => showChart(symbol, lines, f));
+    tfBox.append(b);
+  }
+  const r = await act("/api/candles", { symbol, timeframe: tf });
+  if (!$("dlg").open) return;
+  drawCandles($("dlg-svg"), r.ok ? r.data.candles : [], lines);
+}
 
 function renderGoal(s) {
   const g = s.goal || {};
@@ -668,6 +835,7 @@ function fieldValues() {
 let dlgAlt = null;
 function openDialog({ title, lead, facts, reasons, needWord, okText, okClass, onOk, fields, altText, onAlt }) {
   renderFields(fields);
+  $("dlg-chart").hidden = true;
   const alt = $("dlg-alt");
   alt.hidden = !onAlt; alt.textContent = altText || ""; alt.disabled = false;
   dlgAlt = onAlt || null;
@@ -767,9 +935,15 @@ function showPreview(data) {
       return { message: (r.data.error || "Gönderilemedi") + (extra ? " " + extra : ""), tone: "bad", done: r.status === 409 };
     },
   });
+  showChart(t.symbol, [
+    { price: t.entry, label: "Giriş", color: "#ffffff", dash: "4 3" },
+    { price: t.stop, label: "Stop", color: "#e5484d" },
+    { price: t.targets[0], label: "Hedef", color: "#c6f24e" },
+    { price: m.liquidation, label: "Likid.", color: "#e5a93b", dash: "2 4" },
+  ], t.timeframe && ["5m", "15m", "1h", "4h"].includes(t.timeframe) ? t.timeframe : "15m");
 }
 async function approveFlow(id) {
-  openDialog({ title: "Bilet hazırlanıyor…", lead: "Fiyat, hesap ve risk kontrolleri çalışıyor.", facts: [] });
+  openDialog({ title: "Bilet hazırlanıyor…", lead: "Borsadan bakiye ve güncel fiyat alınıyor, risk kontrolleri çalışıyor (birkaç saniye).", facts: [] });
   const { ok, data } = await act("/api/preview", { ticket_id: id });
   if (!ok) { openDialog({ title: "Bilet açılamadı", lead: data.error || "Bilinmeyen hata", facts: [] }); return; }
   showPreview(data);
@@ -850,6 +1024,9 @@ document.addEventListener("click", (e) => {
   if (b.dataset.approve) approveFlow(b.dataset.approve);
   else if (b.dataset.dismiss) dismissFlow(b.dataset.dismiss);
   else if (b.dataset.cancel) cancelFlow(b.dataset.cancel);
+  else if (b.dataset.close) closeFlow(b.dataset.close, 1);
+  else if (b.dataset.half) closeFlow(b.dataset.half, 0.5);
+  else if (b.dataset.protect) protectFlow(b.dataset.protect);
 });
 $("kill-btn").addEventListener("click", killFlow);
 $("new-btn").addEventListener("click", () => newTradeFlow());
@@ -897,8 +1074,9 @@ async function refresh() {
 window.addEventListener("resize", () => { if (lastState) renderCurve(lastState); });
 const navLinks = [...document.querySelectorAll(".nav a")];
 for (const a of navLinks) a.addEventListener("click", () => navLinks.forEach(b => b.setAttribute("aria-current", String(b === a))));
-refresh();
+refresh().then(refreshVenue);
 setInterval(refresh, 10000);
+setInterval(refreshVenue, 15000);
 </script>
 </body>
 </html>
