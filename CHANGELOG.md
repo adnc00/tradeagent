@@ -5,6 +5,7 @@ Biçim [Keep a Changelog](https://keepachangelog.com/tr-TR/1.1.0/), sürümler [
 ## [0.6.0] - 2026-11-26
 
 ### Eklendi
+- `watch` her turda demo/canlı hesabın özsermayesini kaydeder (günlük/haftalık kayıp sınırları gün başından ölçülür); panel, bağlı olduğu hesabın özsermayesini gösterir.
 - Binance USDⓈ-M (demo/canlı) işlem sonuçları: kapanan biletin net K/Z'si, R'si, çıkış fiyatı ve nedeni borsanın işlem geçmişinden journal'a yazılır; hiç dolmamış girişler "iptal" olur. `watch`, sonucu bilinmeyen kapanmış biletleri her turda doldurur.
 
 ### Düzeltildi

@@ -250,6 +250,14 @@ def apply_result(journal: Journal, ticket: OrderTicket, result) -> None:
     )
 
 
+def record_equity(broker: Broker, journal: Journal) -> None:
+    """Snapshot the account's equity (the daily/weekly loss limits start from the first one of a period)."""
+    try:
+        journal.equity_baselines(broker.name, broker.get_balance().equity)
+    except Exception as exc:  # bookkeeping only
+        print(f"Uyarı: {broker.name} bakiyesi okunamadı ({exc}).")
+
+
 def backfill_results(broker: Broker, journal: Journal) -> list[str]:
     """Record R and P&L for closed tickets whose result was not known when they closed."""
     filled: list[str] = []
@@ -1050,6 +1058,7 @@ def watch_cycle(args: argparse.Namespace, cfg: Config, journal: Journal, channel
     for broker in [b for key, b in brokers.items() if key != "paper"]:
         refresh(broker, journal)
         mark_filled(broker, journal)
+        record_equity(broker, journal)
         for ticket_id in backfill_results(broker, journal):
             print(f"  [{ticket_id}] sonuç borsa işlemlerinden kaydedildi")
     brokers.setdefault("paper", paper_broker(cfg))

@@ -154,3 +154,50 @@ def test_backfill_fills_in_closed_tickets_without_r(tmp_path):
         assert cli.backfill_results(ResultBroker(result), journal) == []
     finally:
         journal.close()
+
+
+# --- equity of the account the panel acts on ---------------------------------------------------------
+
+
+def _snapshots(path, rows):
+    journal = Journal(path)
+    try:
+        with journal._conn:
+            for ts, broker, equity in rows:
+                journal._conn.execute("INSERT INTO equity_snapshots (ts, broker, equity) VALUES (?, ?, ?)", (ts, broker, equity))
+    finally:
+        journal.close()
+
+
+def test_live_panel_shows_the_live_account_equity(tmp_path):
+    from tradeagent import panel
+    from tradeagent.config import load_config
+    from tests.test_cli import write_config
+
+    cfg = load_config(write_config(tmp_path, mode="live", extra="crypto:\n  exchange: binanceusdm\n  testnet: true\n"))
+    now = datetime.now(UTC)
+    _snapshots(cfg.journal_path, [
+        ((now - timedelta(minutes=30)).isoformat(), "ccxt:binanceusdm", 4978.43),
+        ((now - timedelta(minutes=5)).isoformat(), "paper", 10000.0),
+    ])
+    assert panel.build_state(cfg, live=True)["risk"]["equity"] == 4978.43
+    assert panel.build_state(cfg, live=False)["risk"]["equity"] == 10000.0
+
+
+class EquityBroker(ResultBroker):
+    def __init__(self):
+        super().__init__(None, reconcile="open")
+
+    def get_balance(self):
+        from tradeagent.brokers.base import Balance
+        return Balance(equity=4978.43, free=4978.43, currency="USDT")
+
+
+def test_watch_records_live_equity_every_cycle(tmp_path):
+    journal = Journal(tmp_path / "j.sqlite")
+    try:
+        cli.record_equity(EquityBroker(), journal)
+        row = journal._conn.execute("SELECT broker, equity FROM equity_snapshots").fetchone()
+        assert (row["broker"], row["equity"]) == ("ccxt:binanceusdm", 4978.43)
+    finally:
+        journal.close()

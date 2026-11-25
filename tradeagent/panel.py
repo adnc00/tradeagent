@@ -87,7 +87,7 @@ def _ticket(row: sqlite3.Row) -> dict[str, Any]:
     return item
 
 
-def _journal_state(path: Path) -> dict[str, Any]:
+def _journal_state(path: Path, *, live: bool = False) -> dict[str, Any]:
     empty = {"open_tickets": [], "recent_tickets": [], "new_tickets": [], "closed": [], "equity": []}
     if not path.is_file():
         return empty
@@ -109,7 +109,11 @@ def _journal_state(path: Path) -> dict[str, Any]:
             "SELECT id, symbol, closed_at, result_r FROM tickets WHERE status = 'closed' AND result_r IS NOT NULL "
             "ORDER BY closed_at, rowid"
         ).fetchall()
-        latest = conn.execute("SELECT broker FROM equity_snapshots ORDER BY ts DESC LIMIT 1").fetchone()
+        # The equity shown is the account the panel acts on: a remote account when live, the simulator otherwise.
+        preferred = "broker != 'paper'" if live else "broker = 'paper'"
+        latest = conn.execute(f"SELECT broker FROM equity_snapshots WHERE {preferred} ORDER BY ts DESC LIMIT 1").fetchone()
+        if latest is None:
+            latest = conn.execute("SELECT broker FROM equity_snapshots ORDER BY ts DESC LIMIT 1").fetchone()
         equity_rows = []
         if latest is not None:
             equity_rows = conn.execute(
@@ -157,7 +161,7 @@ def _mark_expiry(ticket: dict[str, Any], cfg: Config, moment: datetime) -> dict[
 def build_state(cfg: Config, now: datetime | None = None, *, live: bool = False) -> dict[str, Any]:
     """Everything the page shows, from files on disk only (no exchange calls)."""
     moment = now if now is not None else datetime.now(UTC)
-    journal = _journal_state(cfg.journal_path)
+    journal = _journal_state(cfg.journal_path, live=cfg.mode == "live" and live)
     for key in ("recent_tickets", "new_tickets"):
         journal[key] = [_mark_expiry(t, cfg, moment) for t in journal[key]]
     results = [float(r["result_r"]) for r in journal["closed"]]
