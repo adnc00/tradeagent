@@ -268,14 +268,21 @@ def stale_reasons(ticket: OrderTicket, price: float | None, cfg: Config, now: da
     if price is None:
         reasons.append("Güncel fiyat alınamadı; bayat bilet kontrolü yapılamadığından emir gönderilmez.")
     else:
-        if ticket.stop is not None and (price - ticket.stop) * ticket.side.sign <= 0:
+        sign = ticket.side.sign
+        target = ticket.take_profit
+        if ticket.stop is not None and (price - ticket.stop) * sign <= 0:
             reasons.append(f"Fiyat ({num(price)}) stop seviyesini ({num(ticket.stop)}) zaten geçmiş; kurulum bozuldu.")
-        deviation = abs(price - ticket.entry) / ticket.entry * 100.0
-        if deviation > limits.ticket_max_deviation_pct:
-            reasons.append(
-                f"Fiyat ({num(price)}) girişten %{deviation:.2f} sapma gösteriyor "
-                f"(sınır %{limits.ticket_max_deviation_pct:.2f}); bilet bayat, yeniden tarayın."
-            )
+        elif target is not None and (price - target) * sign >= 0:
+            reasons.append(f"Fiyat ({num(price)}) hedef 1'e ({num(target)}) zaten ulaşmış; fırsat kaçtı.")
+        else:
+            # A limit entry may rest while price is on the target side (waiting for the pullback).
+            # Only a move through the entry towards the stop makes the ticket stale.
+            adverse = (ticket.entry - price) * sign / ticket.entry * 100.0
+            if adverse > limits.ticket_max_deviation_pct:
+                reasons.append(
+                    f"Fiyat ({num(price)}) girişi stop yönünde %{adverse:.2f} geçmiş "
+                    f"(sapma sınırı %{limits.ticket_max_deviation_pct:.2f}); bilet bayat, yeniden tarayın."
+                )
     created = ticket.created_at
     max_age = timedelta(minutes=limits.ticket_max_age_minutes)
     if created is None or now - created > max_age:
@@ -868,6 +875,58 @@ def _order_lines(orders: list[OrderResult]) -> list[str]:
     return [f"  {o.role} {o.side} {num(o.qty)} @ {num(o.price)} [{o.status}]" for o in orders]
 
 
+def _target_touched(ticket: OrderTicket, since: datetime, data) -> bool:
+    """Whether price reached target 1 after ``since`` (5m candles); unknown data counts as no."""
+    target = ticket.take_profit
+    if target is None:
+        return False
+    try:
+        candles = data.get_ohlcv(ticket.symbol, "5m", 300)
+    except Exception:
+        return False
+    recent = candles[candles.index + pd.Timedelta(minutes=5) > pd.Timestamp(since)]
+    if recent.empty:
+        return False
+    if ticket.side.value == "long":
+        return float(recent["high"].max()) >= target
+    return float(recent["low"].min()) <= target
+
+
+def expire_entries(broker: Broker, journal: Journal, cfg: Config, data, now: datetime) -> list[tuple[str, str]]:
+    """Cancel sent-but-unfilled entries that are too old or whose target was reached first."""
+    expired: list[tuple[str, str]] = []
+    limit = timedelta(minutes=cfg.execution.entry_expiry_minutes)
+    for ticket in journal.open_tickets(broker.name):
+        if ticket.status != "submitted":
+            continue
+        row = journal.ticket_row(ticket.id) or {}
+        submitted = datetime.fromisoformat(row["submitted_at"]) if row.get("submitted_at") else None
+        if submitted is None:
+            continue
+        if now - submitted >= limit:
+            reason = f"giriş {cfg.execution.entry_expiry_minutes} dk içinde dolmadı; emir iptal edildi"
+        elif _target_touched(ticket, submitted, data):
+            reason = "fiyat girişe gelmeden hedef 1'e ulaştı; emir iptal edildi"
+        else:
+            continue
+        outcome = broker.cancel_entry(ticket)
+        if outcome == "canceled":
+            journal.set_ticket_status(ticket.id, "canceled", note=reason)
+            expired.append((ticket.id, reason))
+        elif outcome == "filled":
+            journal.set_ticket_status(ticket.id, "open", note="giriş dolmuş; koruyucu emirler yerinde")
+    return expired
+
+
+def _last_note(text: str | None) -> str:
+    lines = [line for line in (text or "").splitlines() if line.strip()]
+    if not lines:
+        return ""
+    last = lines[-1]
+    head, sep, rest = last.partition("Z ")  # journal notes are "YYYY-MM-DD HH:MM:SSZ text"
+    return rest if sep and head[:4].isdigit() else last
+
+
 def announce_updates(journal: Journal, channels: list) -> None:
     """Tell the user when an announced ticket's entry fills or the trade ends."""
     for row in journal.tickets_to_announce("open", ("open",)):
@@ -885,9 +944,15 @@ def announce_updates(journal: Journal, channels: list) -> None:
         stats = journal.stats()
         result = f"{row['result_r']:+.2f}R" if row["result_r"] is not None else "R bilinmiyor"
         pnl = f"{row['pnl']:+,.2f} {quote_currency(row['symbol'])}" if row["pnl"] is not None else "bilinmiyor"
-        verb = "kapandı" if row["status"] == "closed" else "iptal edildi"
+        if row["status"] == "canceled":
+            alert = notify.Alert(
+                f"{row['side'].upper()} {row['symbol']} - giriş iptal edildi",
+                f"Neden: {_last_note(row.get('notes')) or 'bilinmiyor'}\nPozisyon açılmadı; risk yok.\nBilet: {row['id']}",
+            )
+            _send(channels, alert)
+            continue
         alert = notify.Alert(
-            f"{row['side'].upper()} {row['symbol']} - {verb} ({result})",
+            f"{row['side'].upper()} {row['symbol']} - kapandı ({result})",
             f"Sonuç: {result}\nKâr/zarar: {pnl}\nBilet: {row['id']}\n"
             f"Toplam: {stats.trades} işlem, kazanma %{stats.win_rate * 100:.1f}, beklenti {stats.expectancy:+.2f}R, "
             f"toplam {stats.total_r:+.2f}R",
@@ -924,6 +989,12 @@ def watch_cycle(args: argparse.Namespace, cfg: Config, journal: Journal, channel
             broker_for(symbol)
     for broker in [b for key, b in brokers.items() if key != "paper"]:
         refresh(broker, journal)
+    brokers.setdefault("paper", paper_broker(cfg))
+    market = MarketData(cfg.crypto.exchange)
+    now = datetime.now(UTC)
+    for broker in brokers.values():
+        for ticket_id, reason in expire_entries(broker, journal, cfg, market, now):
+            print(f"  [{ticket_id}] {reason}")
     announce_updates(journal, channels)
     stats = journal.stats()
     for setup in fresh:
@@ -955,6 +1026,7 @@ def watch_cycle(args: argparse.Namespace, cfg: Config, journal: Journal, channel
                     headline="demo hesapta otomatik gönderildi",
                     action="\n".join(
                         [f"Hesap: {broker.name} ({broker.environment})", "Gönderilen emirler:", *_order_lines(outcome.orders),
+                         f"Giriş {cfg.execution.entry_expiry_minutes} dk içinde dolmazsa ya da fiyat önce hedefe giderse emir iptal edilir.",
                          "Hepsini kapatmak için: tradeagent kill" + (" --live" if live_for(current.symbol) else "")]
                     ),
                     **details,
@@ -979,7 +1051,8 @@ def watch_cycle(args: argparse.Namespace, cfg: Config, journal: Journal, channel
         command = f"tradeagent execute {current.id}" + (" --live" if live_for(current.symbol) else "")
         action = (
             "Onaylamak için bilgisayarınızda şu komutu çalıştırın, ekrandaki son kontrolden sonra ONAY yazın:\n"
-            f"  {command}\nOnaylamazsanız hiçbir emir gönderilmez."
+            f"  {command}\nOnaylamazsanız hiçbir emir gönderilmez. Gönderilen giriş "
+            f"{cfg.execution.entry_expiry_minutes} dk içinde dolmazsa ya da fiyat önce hedefe giderse iptal edilir."
         )
         alert = notify.ticket_alert(prepared, equity=state.equity, action=action, **details)
         _send(channels, alert)

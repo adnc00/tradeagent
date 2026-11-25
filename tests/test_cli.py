@@ -440,7 +440,7 @@ def test_live_confirmation_works_on_a_tty(config_path, tmp_path, monkeypatch):
     assert len(broker.brackets) == 1 and ticket_status(config, ticket_id) == "submitted"
 
 
-@pytest.mark.parametrize("price,needle", [(100.65 * 1.02, "sapma"), (99.0, "stop"), (None, "eski")])
+@pytest.mark.parametrize("price,needle", [(100.65 * 0.99, "sapma"), (99.0, "stop"), (104.5, "hedef"), (None, "eski")])
 def test_stale_tickets_are_refused_before_the_prompt(config_path, monkeypatch, capsys, price, needle):
     ticket_id = scanned_ticket_id(config_path)
     if price is None:
@@ -461,7 +461,7 @@ def test_guard_runs_again_right_after_onay(config_path, monkeypatch, capsys):
     ticket_id = scanned_ticket_id(config_path)
 
     def move_then_confirm(prompt=""):
-        StubMarketData.price = 100.65 * 1.03
+        StubMarketData.price = 100.65 * 0.99
         return "ONAY"
 
     monkeypatch.setattr(builtins, "input", move_then_confirm)

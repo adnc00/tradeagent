@@ -58,8 +58,11 @@ class ExecutionConfig:
 
     ticket_max_deviation_pct: float = 0.5
     ticket_max_age_minutes: int = 60
+    entry_expiry_minutes: int = 120
 
     def __post_init__(self) -> None:
+        if not 5 <= self.entry_expiry_minutes <= 10080:
+            raise ValueError(f"entry_expiry_minutes 5 ile 10080 arasında olmalı (verilen {self.entry_expiry_minutes!r})")
         deviation = self.ticket_max_deviation_pct
         if not (math.isfinite(deviation) and 0 < deviation <= 20):
             raise ValueError(f"ticket_max_deviation_pct 0 ile 20 arasında olmalı (verilen {deviation!r})")

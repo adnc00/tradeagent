@@ -2,6 +2,15 @@
 
 Biçim [Keep a Changelog](https://keepachangelog.com/tr-TR/1.1.0/), sürümler [SemVer](https://semver.org/lang/tr/).
 
+## [0.4.0] - 2026-11-25
+
+### Değişti
+- Bayat bilet koruması tek yönlü: fiyat hedef yönünde girişten uzaksa limit giriş bekleyebilir; yalnızca girişin stop yönünde `ticket_max_deviation_pct`'den fazla geçilmesi bileti bayatlatır. Fiyat hedef 1'e zaten ulaştıysa bilet reddedilir.
+
+### Eklendi
+- Dolmayan girişlerin süresi: `execution.entry_expiry_minutes` (120 dk) içinde dolmayan ya da fiyat önce hedef 1'e ulaştığı için anlamını yitiren girişler `watch` tarafından iptal edilir ve bildirilir. Giriş iptal sırasında dolmuşsa koruyucu emirler yerinde bırakılır.
+- Saat farkı telafisi (Binance -1021), `check --live` saat kontrolü, Telegram hatalarında API açıklaması, satır tamponlu kayıt.
+
 ## [0.3.0] - 2026-11-25
 
 ### Eklendi

@@ -416,6 +416,18 @@ class CcxtBroker(Broker):
             raise OrderStateUnknown(f"{ticket.id}: artık emirler ({', '.join(failed)}) iptal edilemedi; borsada kontrol edin.")
         return "closed"
 
+    def cancel_entry(self, ticket: OrderTicket) -> str | None:
+        """Cancel an unfilled entry; then drop its legs, unless a position exists (it filled meanwhile)."""
+        ids = client_order_ids(ticket.id)
+        entry = self._lookup(ticket.symbol, ids["entry"], False)
+        if entry is not None:
+            status = str(entry.get("status"))
+            if status == "closed":
+                return "filled"
+            if status in _OPEN_STATUSES and not self._cancel_leg(ticket.symbol, "entry", entry):
+                raise OrderStateUnknown(f"{ticket.id}: giriş emri iptal edilemedi; borsada kontrol edin.")
+        return "filled" if self.reconcile_ticket(ticket) == "open" else "canceled"
+
     def cancel_orders(self, symbol: str) -> int:
         exchange = self._exchange
         cancelled = 0

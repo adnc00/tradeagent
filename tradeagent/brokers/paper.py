@@ -371,6 +371,18 @@ class PaperBroker(Broker):
                     cancelled += 1
         return cancelled
 
+    def cancel_entry(self, ticket: OrderTicket) -> str | None:
+        now = self._clock()
+        with self._transaction():
+            for bracket in self._brackets:
+                if bracket.ticket_id != ticket.id:
+                    continue
+                if bracket.status == "pending":
+                    bracket.status, bracket.closed_at = "canceled", now
+                    return "canceled"
+                return "filled" if bracket.status in ("open", "closed") else "canceled"
+        return None
+
     def close_all(self) -> list[OrderResult]:
         now = self._clock()
         results: list[OrderResult] = []

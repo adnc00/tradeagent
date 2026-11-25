@@ -55,8 +55,10 @@ alpaca:
   paper: true              # true: Alpaca paper hesabı (live modda bile gerçek para kullanılmaz)
 
 execution:
-  ticket_max_deviation_pct: 0.5   # fiyat girişten bu %'den fazla uzaklaştıysa bilet bayat sayılır
+  ticket_max_deviation_pct: 0.5   # fiyat girişi stop yönünde bu %'den fazla geçtiyse bilet bayat sayılır
+                                  # (hedef yönünde uzaklık sorun değil: limit giriş geri çekilmeyi bekler)
   ticket_max_age_minutes: 60      # bu kadar dakikadan eski bilet gönderilmez (yeniden tarayın)
+  entry_expiry_minutes: 120       # gönderilen giriş bu sürede dolmazsa (veya fiyat önce hedefe giderse) iptal edilir
 
 paper:
   equity: 10000            # yerel simülasyonun başlangıç özsermayesi

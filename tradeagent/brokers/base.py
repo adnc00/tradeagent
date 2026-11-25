@@ -149,6 +149,15 @@ class Broker(ABC):
             return "open"
         return "open" if self.get_open_orders(ticket.symbol) else "closed"
 
+    def cancel_entry(self, ticket: OrderTicket) -> str | None:
+        """Cancel the ticket's entry if it has not filled.
+
+        Returns ``"canceled"`` (entry and its protective legs are gone), ``"filled"``
+        (a position exists or the entry already filled: protection is left in place)
+        or ``None`` when the connector cannot do this safely.
+        """
+        return None
+
     def venue_problems(self, ticket: OrderTicket) -> list[str]:
         """Venue-specific reasons the ticket cannot be sent (minimum size etc.)."""
         return []
