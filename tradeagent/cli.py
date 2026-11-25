@@ -209,11 +209,56 @@ def reconcile_live_tickets(broker: Broker, journal: Journal) -> None:
             print(f"DİKKAT: {exc}")
             continue
         if outcome == "closed":
-            journal.set_ticket_status(
-                ticket.id,
-                "closed",
-                note="borsada pozisyon ya da korumalı çalışan giriş yok; kalan emirler temizlendi (sonuç R bilinmiyor)",
-            )
+            apply_result(journal, ticket, venue_result(broker, journal, ticket))
+
+
+_EXIT_TR = {"stop": "stop", "take_profit": "take-profit", "close": "piyasa/elle kapanış"}
+
+
+def venue_result(broker: Broker, journal: Journal, ticket: OrderTicket):
+    """The venue's outcome of a finished ticket; ``None`` when unavailable (never raises)."""
+    finder = getattr(broker, "ticket_result", None)
+    row = journal.ticket_row(ticket.id) or {}
+    if finder is None or not row.get("submitted_at"):
+        return None
+    try:
+        return finder(ticket, datetime.fromisoformat(row["submitted_at"]))
+    except Exception as exc:  # the result is bookkeeping; never block reconciliation
+        print(f"Uyarı: {ticket.id} sonucu borsadan okunamadı ({exc}).")
+        return None
+
+
+def apply_result(journal: Journal, ticket: OrderTicket, result) -> None:
+    if result is None:
+        journal.set_ticket_status(
+            ticket.id, "closed",
+            note="borsada pozisyon ya da korumalı çalışan giriş yok; kalan emirler temizlendi (sonuç R bilinmiyor)",
+        )
+        return
+    if result.status == "unfilled":
+        journal.set_ticket_status(ticket.id, "canceled", note="giriş hiç dolmadı; kalan emirler temizlendi")
+        return
+    row = journal.ticket_row(ticket.id) or {}
+    risk = row.get("risk_amount") or (ticket_risk_amount(ticket) if ticket.stop is not None else None)
+    r = result.pnl / risk if risk else None
+    journal.set_ticket_status(
+        ticket.id, "closed", result_r=r, pnl=result.pnl, closed_at=result.closed_at,
+        note=(
+            f"kapandı ({_EXIT_TR.get(result.exit_reason, result.exit_reason)}) {num(result.exit_price)}, "
+            f"net K/Z {result.pnl:+.4f}" + (f", R {r:+.2f}" if r is not None else "") + " (borsa işlemlerinden)"
+        ),
+    )
+
+
+def backfill_results(broker: Broker, journal: Journal) -> list[str]:
+    """Record R and P&L for closed tickets whose result was not known when they closed."""
+    filled: list[str] = []
+    for ticket in journal.tickets_without_result(broker.name):
+        result = venue_result(broker, journal, ticket)
+        if result is not None and result.status == "closed":
+            apply_result(journal, ticket, result)
+            filled.append(ticket.id)
+    return filled
 
 
 def refresh(broker: Broker, journal: Journal) -> None:
@@ -1005,6 +1050,8 @@ def watch_cycle(args: argparse.Namespace, cfg: Config, journal: Journal, channel
     for broker in [b for key, b in brokers.items() if key != "paper"]:
         refresh(broker, journal)
         mark_filled(broker, journal)
+        for ticket_id in backfill_results(broker, journal):
+            print(f"  [{ticket_id}] sonuç borsa işlemlerinden kaydedildi")
     brokers.setdefault("paper", paper_broker(cfg))
     market = MarketData(cfg.crypto.exchange)
     now = datetime.now(UTC)

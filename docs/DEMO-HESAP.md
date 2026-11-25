@@ -92,6 +92,6 @@ En az 30, tercihen 100'den fazla kapanmış işlem olmadan kazanma oranı ve bek
 
 ## Bilinen sınırlamalar
 
-- Demo dolumlarının R sonucu journal'a otomatik çekilmez. Demo biletleri borsada pozisyon kalmayınca "kapandı (R bilinmiyor)" olarak işaretlenir. Kesin sonuçlar demo.binance.com geçmişindedir.
+- Kapanan demo işlemlerinin sonucu (net K/Z, R, stop/take-profit) Binance'ın işlem geçmişinden journal'a yazılır; panel ve `stats` bunları sayar. Hiç dolmamış girişler "iptal" olarak işaretlenir.
 - Aynı sembolde aynı anda tek bilet çalışır.
 - Tüm USDT-M kriptolar aynı korelasyon grubunda sayılır. Bu yüzden aynı anda açılabilecek toplam risk `max_risk_pct` (%1) ile sınırlıdır; bu, piyasa birlikte düşerken çok sayıda pozisyonun birden zarar etmesini önler.

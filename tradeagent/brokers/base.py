@@ -80,6 +80,17 @@ class Fill:
     r: float | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class TicketResult:
+    """How a sent ticket ended on the venue: ``closed`` (with net P&L after fees) or ``unfilled``."""
+
+    status: str
+    pnl: float | None = None
+    exit_price: float | None = None
+    exit_reason: str | None = None  # stop | take_profit | close
+    closed_at: datetime | None = None
+
+
 class Broker(ABC):
     """Common interface. ``name`` identifies the venue, ``environment`` describes it in Turkish."""
 
@@ -148,6 +159,10 @@ class Broker(ABC):
         if any(p.symbol == ticket.symbol for p in self.get_positions()):
             return "open"
         return "open" if self.get_open_orders(ticket.symbol) else "closed"
+
+    def ticket_result(self, ticket: OrderTicket, since: datetime) -> TicketResult | None:
+        """The venue's own outcome of a finished ticket, or ``None`` when it cannot be told."""
+        return None
 
     def cancel_entry(self, ticket: OrderTicket) -> str | None:
         """Cancel the ticket's entry if it has not filled.

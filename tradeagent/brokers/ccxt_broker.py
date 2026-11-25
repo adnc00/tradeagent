@@ -30,6 +30,7 @@ says exactly what could and could not be cancelled.
 """
 
 import os
+from datetime import UTC, datetime
 from collections.abc import Callable, Iterable, Mapping
 from decimal import ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP, Decimal
 from typing import Any
@@ -37,7 +38,7 @@ from typing import Any
 import ccxt
 import pandas as pd
 
-from tradeagent.brokers.base import Balance, Broker, BrokerError, OrderResult, OrderStateUnknown, Position
+from tradeagent.brokers.base import Balance, Broker, BrokerError, OrderResult, OrderStateUnknown, Position, TicketResult
 from tradeagent.brokers.data import fetch_ccxt
 from tradeagent.models import OrderTicket, Side
 from tradeagent.risk import is_positive
@@ -418,6 +419,51 @@ class CcxtBroker(Broker):
         if failed:
             raise OrderStateUnknown(f"{ticket.id}: artık emirler ({', '.join(failed)}) iptal edilemedi; borsada kontrol edin.")
         return "closed"
+
+    def ticket_result(self, ticket: OrderTicket, since: datetime) -> TicketResult | None:
+        """Net result from the account's own fills on the symbol after ``since``.
+
+        One ticket runs per symbol at a time, so the fills from the first entry fill
+        until the position is flat again belong to this ticket. Realized P&L is the
+        venue's own figure; fees in the settlement currency are subtracted.
+        """
+        since_ms = int(since.timestamp() * 1000) - 60_000
+        trades = self._exchange.fetch_my_trades(ticket.symbol, since_ms, 500)
+        trades = sorted((t for t in trades if (t.get("timestamp") or 0) >= since_ms), key=lambda t: t["timestamp"])
+        settle = ticket.symbol.split(":", 1)[1] if ":" in ticket.symbol else ticket.symbol.split("/", 1)[1]
+        entry_side, exit_side = ticket.side.entry_action, ticket.side.exit_action
+        entered = exited = pnl = fees = exit_value = 0.0
+        last_exit = None
+        for trade in trades:
+            qty = float(trade.get("amount") or 0.0)
+            if trade.get("side") == entry_side and exited == 0.0:
+                entered += qty
+            elif trade.get("side") == exit_side and entered > 0.0:
+                exited += qty
+                exit_value += qty * float(trade.get("price") or 0.0)
+                pnl += float((trade.get("info") or {}).get("realizedPnl") or 0.0)
+                last_exit = trade
+            else:
+                continue
+            fee = trade.get("fee") or {}
+            if str(fee.get("currency") or "").upper() == settle.upper() and fee.get("cost"):
+                fees += float(fee["cost"])
+            if entered > 0.0 and exited >= entered - 1e-9 * entered:
+                break
+        if entered == 0.0:
+            return TicketResult("unfilled")
+        if last_exit is None or exited < entered - 1e-9 * entered:
+            return None  # still (partly) open
+        exit_price = exit_value / exited
+        reason = "close"
+        stop, target = ticket.stop, ticket.take_profit
+        candidates = [(abs(exit_price - level), name) for level, name in ((stop, "stop"), (target, "take_profit")) if level]
+        if candidates:
+            distance, name = min(candidates)
+            if distance <= exit_price * 0.01:
+                reason = name
+        closed_at = datetime.fromtimestamp(last_exit["timestamp"] / 1000.0, UTC)
+        return TicketResult("closed", pnl=pnl - fees, exit_price=exit_price, exit_reason=reason, closed_at=closed_at)
 
     def cancel_entry(self, ticket: OrderTicket) -> str | None:
         """Cancel an unfilled entry; then drop its legs, unless a position exists (it filled meanwhile)."""

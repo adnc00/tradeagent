@@ -487,6 +487,15 @@ class Journal:
             if note:
                 self._append_note("tickets", ticket_id, note)
 
+    def tickets_without_result(self, broker: str) -> list[OrderTicket]:
+        """Sent tickets on ``broker`` that closed but have no R recorded yet."""
+        rows = self._conn.execute(
+            "SELECT * FROM tickets WHERE broker = ? AND status = 'closed' AND result_r IS NULL AND submitted_at IS NOT NULL "
+            "ORDER BY submitted_at",
+            (broker,),
+        )
+        return [self._ticket_from_row(r) for r in rows]
+
     def open_tickets(self, broker: str) -> list[OrderTicket]:
         """Tickets sent to ``broker`` that are not closed or cancelled (they count as open risk)."""
         rows = self._conn.execute(

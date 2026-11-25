@@ -33,7 +33,7 @@
 6. **Çift gönderim yok**: `ONAY`'dan sonra bilet tek bir SQLite işlemiyle `submitting` durumuna alınır; aynı bileti başka bir işlem gönderemez. Gönderim sonucu doğrulanamazsa bilet `unknown` olur, açık risk sayılmaya devam eder ve büyük bir uyarı basılır. Gönderimden sonra journal yazılamazsa bilet `new`'e dönmez.
 7. Risk motoru reddederse bilet onay ekranına bile gelmez. Ret nedenleri şunlardır: stop yok, stop yanlış tarafta, spot piyasada short, risk üst sınırın üstünde, gereken teminat özsermayeyi aşıyor, günlük veya haftalık kayıp limiti dolmuş, toplam açık risk sınırı aşılıyor, korelasyonlu grup riski sınırı aşılıyor, likidasyon stop mesafesinin iki katından yakın ya da girişin yanlış tarafında (yalnızca futures), sembol izin listesinde değil, kaldıraç sınırın üstünde, komisyon oranı geçersiz, R:R (komisyon dahil) düşük.
 8. API anahtarları yalnızca ortam değişkenlerinden veya `.env` dosyasından okunur. Hiçbir yere loglanmaz ve ekrana yazdırılmaz.
-9. Kurulumlar, biletler, emirler, durum değişiklikleri ve notlar `journal.sqlite` dosyasına yazılır. **Gerçekleşmeler (fill) ve R sonucu yalnızca paper modda otomatik journal'a girer**; canlı ve testnet biletlerinde borsadaki fill'ler çekilmez (bkz. sınırlamalar).
+9. Kurulumlar, biletler, emirler, durum değişiklikleri ve notlar `journal.sqlite` dosyasına yazılır. Paper modda her gerçekleşme (fill) journal'a girer. Binance USDⓈ-M (demo ve canlı) biletlerinde kapanan işlemin sonucu borsanın kendi işlem geçmişinden alınır: net kâr/zarar (Binance'ın gerçekleşen K/Z'si eksi komisyonlar), R (net K/Z / bilet risk tutarı), çıkış fiyatı ve nedeni (stop, take-profit, piyasa kapanışı). `watch` sonucu bilinmeyen kapanmış biletleri her turda yeniden dener.
 10. `kill` önce pozisyonları reduce-only piyasa emriyle kapatır, kapandıklarını doğrular, ancak ondan sonra kalan emirleri iptal eder. Kapatılamayan bir pozisyonun stop emirleri korunur; komut sıfırdan farklı bir kodla çıkar ve neyin açık kaldığını tek tek yazar.
 
 ## Kurulum
@@ -229,7 +229,7 @@ Tarama, mumu kapanmış veriyle yapılır; son mum oluşmaya devam ettiği için
 - Kripto için günlük bias ve PDH/PDL, borsanın UTC günlük mumlarıyla hesaplanır (New York gece yarısı değil).
 
 - Günlük ve haftalık kayıp, `journal.sqlite` içindeki özsermaye anlık görüntülerine göre ölçülür. Dönemin başlangıç değeri, araç o dönemde ilk çalıştırıldığında alınır. Araç çalıştırılmadan önce oluşan kayıplar görülmez; para yatırma ve çekme işlemleri de kâr veya zarar gibi görünür.
-- Açık risk, journal'da `submitted` veya `open` durumundaki biletlerden hesaplanır. Canlı modda borsada pozisyonu ya da açık emri kalmayan biletler kapanmış sayılır; bunların R sonucu journal'a otomatik çekilmez.
+- Açık risk, journal'da `submitted` veya `open` durumundaki biletlerden hesaplanır. Canlı modda borsada pozisyonu ya da açık emri kalmayan biletler kapanmış sayılır; sonuçları Binance işlem geçmişinden okunur (Alpaca için henüz yok: R bilinmiyor kalır). Komisyon BNB ile ödeniyorsa o komisyon K/Z'den düşülmez.
 - Paper hesabı tek bir sayısal özsermaye kullanır ve kur çevrimi yapmaz (USDT, TRY ve USD aynı sayı üzerinden boyutlandırılır).
 - Likidasyon fiyatı izole marjinli lineer perp için yaklaşık bir hesaptır. `risk.mmr` değerini borsanın kademesine göre ayarlayın.
 - yfinance verisi gecikmelidir. 15 dakikalık veri yalnızca son 60 gün için alınabilir.

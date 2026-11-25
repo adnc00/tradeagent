@@ -5,4 +5,4 @@ exact confirmation word, in the terminal or in the local panel; the only unatten
 ``watch --demo-auto``, which runs on demo/paper accounts only. See ``tradeagent.cli``.
 """
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
