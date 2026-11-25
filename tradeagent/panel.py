@@ -233,6 +233,17 @@ _SECURITY_HEADERS = {
 }
 
 
+class _PanelServer(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def handle_error(self, request, client_address) -> None:  # type: ignore[no-untyped-def]
+        import sys
+
+        if isinstance(sys.exc_info()[1], ConnectionError):
+            return  # the browser closed the connection (tab closed, reload): not an error
+        super().handle_error(request, client_address)
+
+
 def make_server(cfg: Config, port: int = DEFAULT_PORT, *, live: bool = False) -> ThreadingHTTPServer:
     """The panel server on 127.0.0.1 (``port`` 0 picks a free port)."""
     token = secrets.token_urlsafe(32)
@@ -327,7 +338,7 @@ def make_server(cfg: Config, port: int = DEFAULT_PORT, *, live: bool = False) ->
 
         do_PUT = do_DELETE = do_PATCH = do_OPTIONS = _not_allowed
 
-    return ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    return _PanelServer(("127.0.0.1", port), Handler)
 
 
 def serve(cfg: Config, port: int = DEFAULT_PORT, *, open_browser: bool = True, live: bool = False) -> None:
