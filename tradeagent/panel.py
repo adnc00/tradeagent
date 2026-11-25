@@ -1,15 +1,21 @@
-"""Read-only live panel: a tiny local web server over the journal and the watch heartbeat.
+"""Live panel: a small local web server over the journal, the watch heartbeat and the panel actions.
 
 * Binds to 127.0.0.1 only and refuses requests whose Host header is not this
   server (DNS-rebinding guard).
-* Only GET ``/`` (the page) and GET ``/api/state`` (JSON) exist; every other
-  method is 405. Nothing here can place, change or cancel an order.
-* The journal is opened with SQLite's read-only URI mode, so the panel never
-  writes to it.
+* GET ``/`` (the page) and GET ``/api/state`` (JSON) only read: the journal is
+  opened with SQLite's read-only URI mode for them.
+* Actions (``tradeagent.actions``) are POST-only and need all of: a JSON body,
+  an Origin of this server, and the secret token that is embedded in the page
+  when it is served (a fresh one per panel process). Another web page can
+  therefore neither read the token nor trigger an action. Sending an order
+  and the kill also need the typed word ``ONAY``; actions run one at a time.
 """
 
+import hmac
 import json
+import secrets
 import sqlite3
+import threading
 import webbrowser
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -20,6 +26,7 @@ from typing import Any
 from tradeagent.config import Config
 from tradeagent.ict import NEW_YORK
 from tradeagent.journal import OPEN_STATUSES, compute_stats
+from tradeagent.risk import rr_after_fees
 
 DEFAULT_PORT = 8765
 STATUS_FILE = "watch_status.json"
@@ -27,8 +34,10 @@ ALERTS_FILE = "alerts.jsonl"
 MAX_ALERTS = 60
 MAX_RECENT_TICKETS = 40
 MAX_EQUITY_POINTS = 500
+MAX_BODY_BYTES = 16_384
+TOKEN_PLACEHOLDER = b"{{PANEL_TOKEN}}"
 TICKET_COLUMNS = (
-    "id, symbol, side, market, timeframe, status, entry, stop, targets, qty, leverage, risk_amount, rr, "
+    "id, symbol, side, market, timeframe, status, entry, stop, targets, qty, leverage, fee_rate, risk_amount, rr, "
     "broker, mode, created_at, submitted_at, closed_at, result_r, pnl"
 )
 
@@ -77,7 +86,7 @@ def _ticket(row: sqlite3.Row) -> dict[str, Any]:
 
 
 def _journal_state(path: Path) -> dict[str, Any]:
-    empty = {"open_tickets": [], "recent_tickets": [], "closed": [], "equity": []}
+    empty = {"open_tickets": [], "recent_tickets": [], "new_tickets": [], "closed": [], "equity": []}
     if not path.is_file():
         return empty
     conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=5)
@@ -90,6 +99,9 @@ def _journal_state(path: Path) -> dict[str, Any]:
         ).fetchall()
         recent_rows = conn.execute(
             f"SELECT {TICKET_COLUMNS} FROM tickets ORDER BY created_at DESC LIMIT ?", (MAX_RECENT_TICKETS,)
+        ).fetchall()
+        new_rows = conn.execute(
+            f"SELECT {TICKET_COLUMNS} FROM tickets WHERE status = 'new' ORDER BY created_at DESC LIMIT 50"
         ).fetchall()
         closed_rows = conn.execute(
             "SELECT id, symbol, closed_at, result_r FROM tickets WHERE status = 'closed' AND result_r IS NOT NULL "
@@ -110,15 +122,42 @@ def _journal_state(path: Path) -> dict[str, Any]:
     return {
         "open_tickets": [_ticket(r) for r in open_rows],
         "recent_tickets": [_ticket(r) for r in recent_rows],
+        "new_tickets": [_ticket(r) for r in new_rows],
         "closed": [dict(r) for r in closed_rows],
         "equity": [{"at": r["ts"], "equity": r["equity"], "broker": latest["broker"]} for r in equity_rows],
     }
 
 
-def build_state(cfg: Config, now: datetime | None = None) -> dict[str, Any]:
+def account_info(cfg: Config, live: bool) -> dict[str, Any]:
+    """Which account panel actions reach: live/demo only with ``mode: live`` AND ``panel --live``."""
+    enabled = cfg.mode == "live" and live
+    real_money = enabled and (not cfg.crypto.testnet or not cfg.alpaca.paper)
+    if not enabled:
+        label = "yerel paper (simülasyon)"
+    else:
+        crypto = f"{cfg.crypto.exchange} {'demo' if cfg.crypto.testnet else 'GERÇEK PARA'}"
+        label = f"{crypto} · Alpaca {'paper' if cfg.alpaca.paper else 'GERÇEK PARA'}"
+    return {"live": enabled, "real_money": real_money, "label": label, "actions": True}
+
+
+def _mark_expiry(ticket: dict[str, Any], cfg: Config, moment: datetime) -> dict[str, Any]:
+    created = _parse_time(ticket.get("created_at"))
+    limit = timedelta(minutes=cfg.execution.ticket_max_age_minutes)
+    ticket["expired"] = ticket.get("status") == "new" and (created is None or moment - created > limit)
+    try:
+        ticket["rr_net"] = rr_after_fees(ticket["entry"], ticket["stop"], ticket["targets"][0], ticket.get("fee_rate") or 0.0)
+    except (TypeError, ValueError, IndexError, KeyError):
+        ticket["rr_net"] = None
+    ticket["expires_at"] = (created + limit).isoformat() if created is not None else None
+    return ticket
+
+
+def build_state(cfg: Config, now: datetime | None = None, *, live: bool = False) -> dict[str, Any]:
     """Everything the page shows, from files on disk only (no exchange calls)."""
     moment = now if now is not None else datetime.now(UTC)
     journal = _journal_state(cfg.journal_path)
+    for key in ("recent_tickets", "new_tickets"):
+        journal[key] = [_mark_expiry(t, cfg, moment) for t in journal[key]]
     results = [float(r["result_r"]) for r in journal["closed"]]
     stats = compute_stats(results)
     curve, total = [], 0.0
@@ -168,6 +207,8 @@ def build_state(cfg: Config, now: datetime | None = None) -> dict[str, Any]:
             "total_r": stats.total_r,
         },
         "risk": risk,
+        "account": account_info(cfg, live),
+        "awaiting": [t for t in journal["new_tickets"] if not t["expired"]],
         "open_tickets": journal["open_tickets"],
         "recent_tickets": journal["recent_tickets"],
         "r_curve": curve,
@@ -192,8 +233,10 @@ _SECURITY_HEADERS = {
 }
 
 
-def make_server(cfg: Config, port: int = DEFAULT_PORT) -> ThreadingHTTPServer:
-    """A read-only HTTP server on 127.0.0.1 (``port`` 0 picks a free port)."""
+def make_server(cfg: Config, port: int = DEFAULT_PORT, *, live: bool = False) -> ThreadingHTTPServer:
+    """The panel server on 127.0.0.1 (``port`` 0 picks a free port)."""
+    token = secrets.token_urlsafe(32)
+    action_lock = threading.Lock()
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "tradeagent-panel"
@@ -212,6 +255,13 @@ def make_server(cfg: Config, port: int = DEFAULT_PORT) -> ThreadingHTTPServer:
             if self.command != "HEAD":
                 self.wfile.write(body)
 
+        def _json(self, code: int, payload: dict[str, Any]) -> None:
+            self._send(code, json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8"), "application/json; charset=utf-8")
+
+        def _origins(self) -> set[str]:
+            actual = self.server.server_address[1]
+            return {f"http://127.0.0.1:{actual}", f"http://localhost:{actual}"}
+
         def _host_ok(self) -> bool:
             actual = self.server.server_address[1]
             return self.headers.get("Host", "") in {f"127.0.0.1:{actual}", f"localhost:{actual}"}
@@ -222,27 +272,71 @@ def make_server(cfg: Config, port: int = DEFAULT_PORT) -> ThreadingHTTPServer:
                 return
             path = self.path.split("?", 1)[0]
             if path == "/":
-                self._send(200, _page(), "text/html; charset=utf-8")
+                self._send(200, _page().replace(TOKEN_PLACEHOLDER, token.encode("ascii")), "text/html; charset=utf-8")
             elif path == "/api/state":
-                body = json.dumps(build_state(cfg), ensure_ascii=False, default=str).encode("utf-8")
-                self._send(200, body, "application/json; charset=utf-8")
+                self._json(200, build_state(cfg, live=live))
             else:
                 self._send(404, b"not found", "text/plain; charset=utf-8")
 
         do_HEAD = do_GET
 
-        def _not_allowed(self) -> None:
-            self._send(405, b"read-only panel", "text/plain; charset=utf-8")
+        def do_POST(self) -> None:  # noqa: N802 - http.server API
+            from tradeagent import actions
 
-        do_POST = do_PUT = do_DELETE = do_PATCH = do_OPTIONS = _not_allowed
+            path = self.path.split("?", 1)[0]
+            if path in ("/", "/api/state"):
+                self._send(405, b"read-only", "text/plain; charset=utf-8")
+                return
+            action = actions.ACTIONS.get(path)
+            if action is None:
+                self._json(404, {"error": "bilinmeyen işlem"})
+                return
+            if not self._host_ok() or self.headers.get("Origin", "") not in self._origins():
+                self._json(403, {"error": "yalnızca bu bilgisayardaki panel sayfasından"})
+                return
+            if not self.headers.get("Content-Type", "").lower().startswith("application/json"):
+                self._json(415, {"error": "JSON bekleniyor"})
+                return
+            if not hmac.compare_digest(self.headers.get("X-Panel-Token", ""), token):
+                self._json(403, {"error": "panel anahtarı geçersiz; sayfayı yenileyin"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except ValueError:
+                length = -1
+            if not 0 <= length <= MAX_BODY_BYTES:
+                self._json(413, {"error": "istek çok büyük"})
+                return
+            try:
+                body = json.loads(self.rfile.read(length) or b"{}")
+            except ValueError:
+                body = None
+            if not isinstance(body, dict):
+                self._json(400, {"error": "geçersiz istek"})
+                return
+            with action_lock:  # one action at a time: no double sends from double clicks
+                try:
+                    self._json(200, action(cfg, live, body))
+                except actions.ActionError as exc:
+                    self._json(exc.code, exc.payload())
+                except Exception as exc:  # report, never crash the panel
+                    self._json(500, {"error": f"{type(exc).__name__}: {exc}"})
+
+        def _not_allowed(self) -> None:
+            self._send(405, b"not allowed", "text/plain; charset=utf-8")
+
+        do_PUT = do_DELETE = do_PATCH = do_OPTIONS = _not_allowed
 
     return ThreadingHTTPServer(("127.0.0.1", port), Handler)
 
 
-def serve(cfg: Config, port: int = DEFAULT_PORT, *, open_browser: bool = True) -> None:
-    httpd = make_server(cfg, port)
+def serve(cfg: Config, port: int = DEFAULT_PORT, *, open_browser: bool = True, live: bool = False) -> None:
+    httpd = make_server(cfg, port, live=live)
     url = f"http://127.0.0.1:{httpd.server_address[1]}/"
-    print(f"Panel: {url}  (yalnızca bu bilgisayardan erişilir, salt okunur). Durdurmak için Ctrl+C.")
+    account = account_info(cfg, live)
+    print(f"Panel: {url}  (yalnızca bu bilgisayardan). İşlemler: {account['label']}. Durdurmak için Ctrl+C.")
+    if account["real_money"]:
+        print("DİKKAT: panelden onaylanan emirler GERÇEK PARA hesabına gider (her emirde ONAY yazmanız gerekir).")
     if open_browser:
         webbrowser.open(url)
     try:

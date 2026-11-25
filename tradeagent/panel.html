@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="panel-token" content="{{PANEL_TOKEN}}">
 <title>tradeagent · canlı panel</title>
 <style>
 :root {
@@ -38,6 +39,7 @@
   --font: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; background: var(--ground); color: var(--text); }
 body { font: 400 var(--fs-body)/1.5 var(--font); -webkit-font-smoothing: antialiased; }
 a { color: inherit; }
@@ -129,6 +131,43 @@ td .sub { color: var(--faint); font-size: var(--fs-small); }
 .feed pre { margin: 10px 0 2px 74px; white-space: pre-wrap; font: 400 13px/1.55 var(--font); color: var(--muted); background: var(--raised); border-radius: 12px; padding: 12px 14px; }
 footer { color: var(--faint); font-size: var(--fs-small); display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-top: 6px; }
 
+
+/* controls */
+.btn { font: 500 13px/1 var(--font); height: 32px; padding: 0 14px; border-radius: var(--radius-control); border: 1px solid var(--control); background: transparent; color: var(--text); cursor: pointer; white-space: nowrap; transition: background-color .15s ease, border-color .15s ease, transform .1s ease; }
+.btn:hover { background: var(--raised); }
+.btn:active { transform: scale(.97); }
+.btn:disabled { opacity: .4; cursor: not-allowed; transform: none; }
+.btn.primary { background: var(--text); color: #000; border-color: var(--text); }
+.btn.primary:hover { background: #e6e6e6; }
+.btn.danger { background: var(--pill-negative-bg); color: var(--pill-negative-ink); border-color: transparent; }
+.btn.danger:hover { background: #3a1f27; }
+.btn.small { height: 28px; padding: 0 12px; font-size: 12.5px; }
+.actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.account .btn { margin-left: 4px; }
+.real { color: var(--negative); font-weight: 600; }
+
+/* approval queue */
+.queue-empty { color: var(--faint); margin: 0; }
+.await-row td { vertical-align: middle; }
+
+/* dialog */
+dialog { border: 0; padding: 0; border-radius: var(--radius-card); background: var(--surface); color: var(--text); width: min(560px, calc(100vw - 32px)); box-shadow: 0 24px 64px rgba(0,0,0,.6); }
+dialog::backdrop { background: rgba(0,0,0,.62); }
+.dlg { padding: 24px; display: grid; gap: 16px; }
+.dlg h2 { font-size: 18px; }
+.dlg .lead { margin: 0; color: var(--muted); }
+.facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin: 0; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; font-variant-numeric: tabular-nums; }
+.reasons { margin: 0; padding: 12px 14px 12px 30px; background: var(--pill-negative-bg); color: var(--pill-negative-ink); border-radius: 12px; }
+.notice { margin: 0; padding: 12px 14px; border-radius: 12px; background: var(--raised); color: var(--muted); }
+.notice.bad { background: var(--pill-negative-bg); color: var(--pill-negative-ink); }
+.notice.good { background: var(--pill-positive-bg); color: var(--pill-positive-ink); }
+.confirm-field { display: grid; gap: 6px; }
+.confirm-field label { color: var(--muted); font-size: 13px; }
+.confirm-field input { height: 40px; border-radius: 10px; border: 1px solid var(--control); background: var(--ground); color: var(--text); padding: 0 12px; font: 500 15px var(--font); letter-spacing: .04em; }
+.confirm-field input:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
+
 @media (max-width: 1180px) {
   .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .kpi:nth-child(4) { border-left: 0; }
@@ -153,6 +192,7 @@ footer { color: var(--faint); font-size: var(--fs-small); display: flex; justify
   .kpi:nth-child(n+3) { border-top: 1px solid var(--rule); }
   .feed pre { margin-left: 0; }
 }
+@media (max-width: 760px) { .account { flex-wrap: wrap; justify-content: space-between; white-space: normal; } .account .btn { margin: 0; } .actions { justify-content: flex-start; } .facts { grid-template-columns: 1fr; gap: 2px; } .facts dd { margin-bottom: 8px; } }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
@@ -170,11 +210,12 @@ footer { color: var(--faint); font-size: var(--fs-small); display: flex; justify
     <nav class="nav" aria-label="Bölümler">
       <small>Panel</small>
       <a href="#ozet" aria-current="true">Genel bakış</a>
+      <a href="#onay">Onay bekleyenler</a>
       <a href="#pozisyonlar">Pozisyonlar</a>
       <a href="#bildirimler">Bildirimler</a>
       <a href="#biletler">Biletler</a>
     </nav>
-    <div class="side-foot">Salt okunur panel. Emir vermek için terminalde <b>execute</b> ve ONAY; kapatmak için <b>kill</b>.</div>
+    <div class="side-foot">Emir yalnızca siz <b>ONAY</b> yazınca gider. Tüm risk kontrolleri gönderimden hemen önce yeniden çalışır. Panel yalnızca bu bilgisayardan açılır.</div>
   </aside>
 
   <header class="top">
@@ -182,7 +223,7 @@ footer { color: var(--faint); font-size: var(--fs-small); display: flex; justify
       <span class="dot" id="dot"></span>
       <p id="status-line">Panel verisi yükleniyor…</p>
     </div>
-    <div class="account"><span id="account">-</span></div>
+    <div class="account"><span id="account">-</span><button class="btn danger small" id="kill-btn" type="button">Acil durdur</button></div>
   </header>
 
   <main id="ozet">
@@ -190,6 +231,11 @@ footer { color: var(--faint); font-size: var(--fs-small); display: flex; justify
       <h1>Genel bakış</h1>
       <p id="summary">-</p>
     </div>
+
+    <section class="card" id="onay" aria-labelledby="h-await">
+      <div class="card-head"><h2 id="h-await">Onay bekleyenler</h2><span id="await-note">-</span></div>
+      <div class="table-wrap" id="await-wrap"></div>
+    </section>
 
     <section class="card kpis" aria-label="Performans">
       <div class="kpi"><label>Toplam sonuç</label><output class="num" id="k-total">-</output><small>kapanmış işlemler, R</small></div>
@@ -240,6 +286,24 @@ footer { color: var(--faint); font-size: var(--fs-small); display: flex; justify
       </section>
     </div>
 
+    <dialog id="dlg" aria-labelledby="dlg-title">
+      <form class="dlg" method="dialog" id="dlg-form">
+        <h2 id="dlg-title">-</h2>
+        <p class="lead" id="dlg-lead"></p>
+        <dl class="facts" id="dlg-facts"></dl>
+        <ul class="reasons" id="dlg-reasons" hidden></ul>
+        <div class="confirm-field" id="dlg-confirm" hidden>
+          <label for="dlg-word">Onaylamak için tam olarak ONAY yazın</label>
+          <input id="dlg-word" autocomplete="off" spellcheck="false" inputmode="text">
+        </div>
+        <p class="notice" id="dlg-result" hidden></p>
+        <div class="actions">
+          <button class="btn" type="button" id="dlg-cancel">Vazgeç</button>
+          <button class="btn primary" type="button" id="dlg-ok" disabled>Onayla</button>
+        </div>
+      </form>
+    </dialog>
+
     <footer>
       <span id="updated">-</span>
       <span>Yatırım tavsiyesi değildir. Veriler bu bilgisayardaki journal ve izleme kaydından okunur.</span>
@@ -255,6 +319,17 @@ const STATUS = {
   open: ["Pozisyon açık", "p"], closed: ["Kapandı", ""], canceled: ["İptal", ""], unknown: ["Belirsiz", "w"],
 };
 const $ = (id) => document.getElementById(id);
+const TOKEN = (document.querySelector('meta[name="panel-token"]') || {}).content || "";
+async function act(path, body) {
+  const res = await fetch(path, {
+    method: "POST", cache: "no-store",
+    headers: { "Content-Type": "application/json", "X-Panel-Token": TOKEN },
+    body: JSON.stringify(body || {}),
+  });
+  let data = {};
+  try { data = await res.json(); } catch (e) { data = { error: "Sunucudan geçersiz yanıt (" + res.status + ")" }; }
+  return { ok: res.ok, status: res.status, data };
+}
 const nf = (d) => new Intl.NumberFormat("tr-TR", { minimumFractionDigits: d, maximumFractionDigits: d });
 const n2 = nf(2);
 function el(tag, attrs, ...kids) {
@@ -285,7 +360,8 @@ function ago(iso) {
   const m = Math.round(ms / 60000);
   return m < 1 ? "az önce" : m < 60 ? m + " dk önce" : Math.round(m / 60) + " sa önce";
 }
-function pill(status) {
+function pill(status, expired) {
+  if (status === "new" && expired) return el("span", { class: "pill", text: "Süresi doldu" });
   const [label, tone] = STATUS[status] || [status, ""];
   return el("span", { class: "pill" + (tone ? " " + tone : ""), text: label });
 }
@@ -307,7 +383,9 @@ function renderStatus(s) {
   const mode = w.mode === "demo-auto" ? "Demo otomatik" : w.mode === "bildirim" ? "Bildirim modu" : "Mod bilinmiyor";
   const c = s.config;
   const venue = c.mode === "live" ? `${c.exchange} · ${c.testnet ? "demo hesap" : "GERÇEK PARA"}` : "yerel paper";
-  $("account").textContent = `${mode} · ${w.account || venue}`;
+  const acct = $("account");
+  acct.textContent = `${mode} · panel işlemleri: `;
+  acct.append(el("span", { class: s.account.real_money ? "real" : "", text: s.account.label }));
   const scanned = w.scanned != null ? `${w.scanned} parite taranıyor` : (w.targets || "henüz tarama yok");
   const open = s.open_tickets.length;
   const r = s.risk;
@@ -422,6 +500,8 @@ function renderPositions(s) {
     { label: "Kaldıraç", r: 1, get: t => (t.leverage || 1) + "x" },
     { label: "Risk", r: 1, get: t => t.risk_amount == null ? "-" : n2.format(t.risk_amount) },
     { label: "Gönderim", r: 1, get: t => when(t.submitted_at, true) },
+    { label: "", r: 1, get: t => t.status === "submitted"
+      ? el("button", { class: "btn small", type: "button", "data-cancel": t.id, text: "Girişi iptal et" }) : "" },
   ], rows, "Açık pozisyon veya bekleyen emir yok. Ajan uygun kurulum bulunca burada görünür."));
 }
 
@@ -442,7 +522,7 @@ function renderTickets(s) {
   wrap.append(table([
     { label: "Sembol", get: t => t.symbol },
     { label: "Yön", get: sideCell },
-    { label: "Durum", get: t => pill(t.status) },
+    { label: "Durum", get: t => pill(t.status, t.expired) },
     { label: "Sonuç", r: 1, get: t => {
       if (t.result_r == null) return "-";
       return el("span", { class: "pill " + (t.result_r > 0 ? "p" : t.result_r < 0 ? "n" : ""), text: signedR(t.result_r) });
@@ -451,6 +531,164 @@ function renderTickets(s) {
   ], s.recent_tickets, "Henüz bilet yok."));
 }
 
+
+function renderAwaiting(s) {
+  const rows = s.awaiting || [];
+  const auto = (s.watch || {}).mode === "demo-auto";
+  $("await-note").textContent = rows.length ? `${rows.length} bilet · ${s.account.label}` : s.account.label;
+  const wrap = $("await-wrap");
+  wrap.textContent = "";
+  if (!rows.length) {
+    wrap.append(el("p", { class: "queue-empty", text: auto
+      ? "Onay bekleyen bilet yok. İzleme demo otomatik modda: uygun biletler onaysız gönderilir."
+      : "Onay bekleyen bilet yok. Ajan uygun kurulum bulunca burada görünür ve bildirim gönderir." }));
+    return;
+  }
+  wrap.append(table([
+    { label: "Sembol", get: symbolCell },
+    { label: "Yön", get: sideCell },
+    { label: "Giriş", r: 1, get: t => price(t.entry) },
+    { label: "Stop", r: 1, get: t => price(t.stop) },
+    { label: "Hedef", r: 1, get: t => price(t.targets[0]) },
+    { label: "R:R", r: 1, get: t => t.rr_net == null ? "-" : n2.format(t.rr_net) },
+    { label: "Geçerlilik", r: 1, get: t => when(t.expires_at) },
+    { label: "", r: 1, get: t => el("div", { class: "actions" },
+        el("button", { class: "btn small", type: "button", "data-dismiss": t.id, text: "Reddet" }),
+        el("button", { class: "btn primary small", type: "button", "data-approve": t.id, text: "İncele ve onayla" })) },
+  ], rows, ""));
+}
+
+/* dialog */
+let dlgAction = null;
+function openDialog({ title, lead, facts, reasons, needWord, okText, okClass, onOk }) {
+  $("dlg-title").textContent = title;
+  $("dlg-lead").textContent = lead || "";
+  const dl = $("dlg-facts"); dl.textContent = "";
+  for (const [k, v] of facts || []) dl.append(el("dt", { text: k }), el("dd", { text: v }));
+  const ul = $("dlg-reasons"); ul.textContent = "";
+  ul.hidden = !(reasons && reasons.length);
+  for (const r of reasons || []) ul.append(el("li", { text: r }));
+  $("dlg-confirm").hidden = !needWord;
+  $("dlg-word").value = "";
+  const res = $("dlg-result"); res.hidden = true; res.className = "notice";
+  const ok = $("dlg-ok");
+  ok.textContent = okText || "Onayla";
+  ok.className = "btn " + (okClass || "primary");
+  ok.hidden = !onOk;
+  ok.disabled = !!needWord || (reasons && reasons.length > 0);
+  $("dlg-cancel").textContent = "Vazgeç";
+  dlgAction = onOk ? { onOk, needWord } : null;
+  $("dlg").showModal();
+  if (needWord && !ok.disabled) $("dlg-word").focus();
+  if (needWord && reasons && reasons.length) ok.disabled = true;
+  dlgAction && (dlgAction.blocked = !!(reasons && reasons.length));
+}
+function showResult(text, tone) {
+  const res = $("dlg-result");
+  res.textContent = text; res.className = "notice " + (tone || ""); res.hidden = false;
+}
+$("dlg-word").addEventListener("input", () => {
+  if (!dlgAction) return;
+  $("dlg-ok").disabled = dlgAction.blocked || $("dlg-word").value !== "ONAY";
+});
+$("dlg-cancel").addEventListener("click", () => $("dlg").close());
+$("dlg-ok").addEventListener("click", async () => {
+  if (!dlgAction) return;
+  const ok = $("dlg-ok");
+  ok.disabled = true; ok.textContent = "Gönderiliyor…";
+  try {
+    const word = $("dlg-word").value;
+    const { message, tone, done } = await dlgAction.onOk(word);
+    showResult(message, tone);
+    if (done) { ok.hidden = true; $("dlg-cancel").textContent = "Kapat"; dlgAction = null; refresh(); }
+    else { ok.disabled = false; ok.textContent = "Tekrar dene"; }
+  } catch (err) {
+    showResult("Panel sunucusuna ulaşılamadı: " + err, "bad");
+    ok.disabled = false; ok.textContent = "Tekrar dene";
+  }
+});
+
+function money2(v, cur) { return v == null ? "-" : n2.format(v) + (cur ? " " + cur : ""); }
+async function approveFlow(id) {
+  openDialog({ title: "Bilet hazırlanıyor…", lead: "Fiyat, hesap ve risk kontrolleri çalışıyor.", facts: [] });
+  const { ok, data } = await act("/api/preview", { ticket_id: id });
+  if (!ok) { openDialog({ title: "Bilet açılamadı", lead: data.error || "Bilinmeyen hata", facts: [] }); return; }
+  const t = data.ticket, m = data.metrics, a = data.account;
+  const side = t.side === "long" ? "LONG (alış)" : "SHORT (açığa satış)";
+  openDialog({
+    title: `${t.side === "long" ? "LONG" : "SHORT"} ${t.symbol}`,
+    lead: a.real_money ? "DİKKAT: bu emir GERÇEK PARA hesabına gider." : `Hesap: ${a.broker} (${a.environment})`,
+    facts: [
+      ["Yön", side], ["Giriş (limit)", price(t.entry)], ["Stop", price(t.stop)],
+      ["Hedef (take-profit)", price(t.targets[0])], ["Miktar", price(t.qty)],
+      ["Pozisyon değeri", money2(m.notional, m.currency)], ["Kaldıraç", t.leverage + "x (marjin " + money2(m.margin, m.currency) + ")"],
+      ["Risk (stop olursa)", `${money2(m.risk_amount, m.currency)} = %${m.risk_pct == null ? "-" : n2.format(m.risk_pct)}`],
+      ["Hedefte kazanç", m.gain == null ? "-" : `${money2(m.gain, m.currency)} = %${n2.format(m.gain_pct)} (${n2.format(m.rr)}R)`],
+      ["Likidasyon", m.liquidation == null ? "yok (kaldıraçsız)" : price(m.liquidation)],
+      ["Bilet", t.id],
+    ],
+    reasons: data.reasons,
+    needWord: true, okText: "Emri gönder", okClass: a.real_money ? "danger" : "primary",
+    onOk: async (word) => {
+      const r = await act("/api/execute", { ticket_id: id, confirm: word });
+      if (r.ok) return { message: "Emir gönderildi: giriş, stop ve hedef borsada. " + (r.data.lines || []).join(" "), tone: "good", done: true };
+      const extra = (r.data.reasons || []).join(" · ");
+      return { message: (r.data.error || "Gönderilemedi") + (extra ? " " + extra : ""), tone: "bad", done: r.status === 409 };
+    },
+  });
+}
+function dismissFlow(id) {
+  openDialog({
+    title: "Bileti reddet", lead: `${id} gönderilmeyecek ve listeden kalkacak. Hesapta hiçbir şey değişmez.`,
+    facts: [], okText: "Reddet", okClass: "btn",
+    onOk: async () => {
+      const r = await act("/api/dismiss", { ticket_id: id });
+      return r.ok ? { message: "Bilet reddedildi.", tone: "good", done: true } : { message: r.data.error, tone: "bad", done: true };
+    },
+  });
+}
+function cancelFlow(id) {
+  openDialog({
+    title: "Girişi iptal et", lead: `${id}: dolmamış limit giriş, stop ve hedefiyle birlikte iptal edilir. Giriş dolmuşsa pozisyon ve koruması olduğu gibi kalır.`,
+    facts: [], okText: "Girişi iptal et", okClass: "danger",
+    onOk: async () => {
+      const r = await act("/api/cancel", { ticket_id: id });
+      if (!r.ok) return { message: r.data.error, tone: "bad", done: false };
+      return r.data.status === "filled"
+        ? { message: r.data.message, tone: "", done: true }
+        : { message: "Giriş ve koruyucu emirleri iptal edildi.", tone: "good", done: true };
+    },
+  });
+}
+function killFlow() {
+  const label = lastState ? lastState.account.label : "";
+  openDialog({
+    title: "Acil durdur", lead: `Hesap: ${label}. Tüm açık pozisyonlar piyasa emriyle kapatılır, kapandığı doğrulanan sembollerin emirleri iptal edilir.`,
+    facts: [], needWord: true, okText: "Hepsini kapat", okClass: "danger",
+    onOk: async (word) => {
+      const r = await act("/api/kill", { confirm: word });
+      if (!r.ok) return { message: r.data.error, tone: "bad", done: false };
+      const p = r.data.problems || [];
+      return p.length ? { message: "Tamamlanamadı: " + p.join(" · "), tone: "bad", done: true } : { message: "Pozisyonlar kapatıldı, emirler iptal edildi.", tone: "good", done: true };
+    },
+  });
+}
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  if (b.dataset.approve) approveFlow(b.dataset.approve);
+  else if (b.dataset.dismiss) dismissFlow(b.dataset.dismiss);
+  else if (b.dataset.cancel) cancelFlow(b.dataset.cancel);
+});
+$("kill-btn").addEventListener("click", killFlow);
+
+const drawn = {};
+function changed(key, value) {
+  const text = JSON.stringify(value);
+  if (drawn[key] === text) return false;
+  drawn[key] = text;
+  return true;
+}
 let lastState = null;
 async function refresh() {
   try {
@@ -458,7 +696,12 @@ async function refresh() {
     if (!res.ok) throw new Error("HTTP " + res.status);
     const s = await res.json();
     lastState = s;
-    renderStatus(s); renderKpis(s); renderCurve(s); renderRisk(s); renderPositions(s); renderFeed(s); renderTickets(s);
+    renderStatus(s); renderKpis(s); renderRisk(s);
+    if (changed("await", [s.awaiting, s.account, (s.watch || {}).mode])) renderAwaiting(s);
+    if (changed("curve", s.r_curve)) renderCurve(s);
+    if (changed("pos", s.open_tickets)) renderPositions(s);
+    if (changed("feed", s.alerts)) renderFeed(s);
+    if (changed("tix", s.recent_tickets)) renderTickets(s);
     $("updated").textContent = "Panel güncellendi: " + when(s.generated_at) + " (10 sn'de bir yenilenir)";
   } catch (err) {
     $("dot").className = "dot bad";

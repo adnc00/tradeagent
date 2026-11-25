@@ -1319,7 +1319,10 @@ def cmd_panel(args: argparse.Namespace, cfg: Config) -> int:
         print("Hata: --port 0 ile 65535 arasında olmalı.")
         return EXIT_REJECTED
     try:
-        panel.serve(cfg, args.port, open_browser=not args.no_browser)
+        notice = gate_notice(cfg, args.live)
+        if notice:
+            print(notice)
+        panel.serve(cfg, args.port, open_browser=not args.no_browser, live=args.live)
     except OSError as exc:
         print(f"Panel başlatılamadı ({exc}). Port kullanımda olabilir: --port ile başka bir port deneyin.")
         return EXIT_ABORTED
@@ -1391,9 +1394,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("telegram-chatid", help="botunuza yazan sohbetlerin chat id'lerini listeler")
 
-    panel_cmd = sub.add_parser("panel", help="canlı izleme paneli: http://127.0.0.1:8765 (salt okunur)")
+    panel_cmd = sub.add_parser("panel", help="canlı panel: http://127.0.0.1:8765 (izleme, onay, iptal, acil durdurma)")
     panel_cmd.add_argument("--port", type=int, default=panel.DEFAULT_PORT, help=f"port (varsayılan {panel.DEFAULT_PORT})")
     panel_cmd.add_argument("--no-browser", action="store_true", help="tarayıcıyı otomatik açma")
+    panel_cmd.add_argument("--live", action="store_true", help="panel işlemleri config'deki canlı/demo hesaba gitsin (ayrıca mode: live)")
 
     watch = sub.add_parser("watch", help="7/24 izleme: periyodik tarama + bildirim (demo'da isteğe bağlı otomatik)")
     watch_targets = watch.add_mutually_exclusive_group(required=True)

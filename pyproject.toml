@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tradeagent"
-version = "0.4.0"
+version = "0.5.0"
 description = "Onaylı ICT/SMC trade ajanı: tarama, risk motoru ve yalnızca kullanıcı onayıyla emir."
 readme = "README.md"
 requires-python = ">=3.14"

@@ -28,7 +28,7 @@
 1. Varsayılan mod `paper`, yani yerel simülasyon. Canlı (gerçek veya uzak) broker **ancak iki koşul birlikte sağlanırsa** kurulur: `config.yaml` içinde `mode: live` **ve** komutta `--live`. Biri eksikse, API anahtarları tanımlı olsa bile paper kullanılır.
 2. `execute` fiyatları ve miktarı borsaya gidecekleri hâliyle yuvarlar (stop ve hedefler riski azaltan yöne). Ardından miktarı emri gönderecek hesaba göre yeniden hesaplar ve risk motorunu güncel hesap durumuyla çalıştırır. Bileti eksiksiz gösterir: sembol, yön, miktar, pozisyon değeri, giriş, stop, hedefler, risk tutarı ve yüzdesi, komisyon dahil R:R, kaldıraç, likidasyon, broker ve mod. Emir yalnızca tam olarak `ONAY` yazılırsa gider. `onay`, `ONAY ` (sonda boşluk), `evet`, boş satır gibi başka her girdi işlemi iptal eder.
 3. **Bayat bilet koruması**: güncel fiyat stop'u geçmişse, hedef 1'e zaten ulaşmışsa, girişi stop yönünde `execution.ticket_max_deviation_pct` (varsayılan %0.5) fazla geçmişse ya da bilet `execution.ticket_max_age_minutes` (varsayılan 60 dk) dakikadan eskiyse bilet onaya sunulmaz. Fiyatın hedef yönünde girişten uzak olması sorun değildir: limit giriş geri çekilmeyi bekler. **Gönderilmiş ama dolmamış giriş**, `execution.entry_expiry_minutes` (varsayılan 120 dk) içinde dolmazsa ya da fiyat girişe gelmeden hedef 1'e ulaşırsa `watch` tarafından iptal edilir (koruyucu stop/TP emirleriyle birlikte; giriş iptal sırasında dolduysa koruma yerinde bırakılır). Bu kontrol ve risk motoru, `ONAY` yazıldıktan hemen sonra da gönderilecek biletin kendisi üzerinde bir kez daha çalışır.
-4. **Canlı onay yalnızca etkileşimli terminalden (TTY)** alınır. Girdi bir borudan, dosyadan ya da başka bir programdan (betik, yapay zekâ ajanı) geliyorsa canlı `execute` ve `kill` hiçbir şey göndermeden durur. Paper modda borudan gelen `ONAY` kabul edilir (demo ve testler için).
+4. **Canlı onay yalnızca sizden gelir:** etkileşimli terminalde (TTY) `execute`/`kill` ile ya da yerel panelde onay penceresine `ONAY` yazarak. Terminalde girdi bir borudan, dosyadan ya da başka bir programdan geliyorsa canlı `execute` ve `kill` hiçbir şey göndermeden durur. Panel yalnızca 127.0.0.1'den açılır; her işlem sayfaya gömülü, her panel açılışında yenilenen gizli bir anahtar, panelin kendi kaynağı (Origin) ve JSON gövde ister, bu yüzden başka bir web sitesi panel adına işlem tetikleyemez. Paper modda borudan gelen `ONAY` kabul edilir (demo ve testler için).
 5. Gerçek para için onayı atlatan bir bayrak, ortam değişkeni veya ayar **yoktur**. Tek istisna `watch --demo-auto`'dur ve yalnızca para hareket etmeyen hesaplarda çalışır: yerel paper, `crypto.testnet: true` (Binance Demo Trading) ve `alpaca.paper: true`. Hedeflerden biri gerçek para hesabıysa komut başlamadan reddeder; gönderim anında da broker'ın demo olduğu ayrıca kontrol edilir. Testler bunu kaynak kodu tarayarak ve senaryolarla doğrular. `kill` komutu da `ONAY` ister.
 6. **Çift gönderim yok**: `ONAY`'dan sonra bilet tek bir SQLite işlemiyle `submitting` durumuna alınır; aynı bileti başka bir işlem gönderemez. Gönderim sonucu doğrulanamazsa bilet `unknown` olur, açık risk sayılmaya devam eder ve büyük bir uyarı basılır. Gönderimden sonra journal yazılamazsa bilet `new`'e dönmez.
 7. Risk motoru reddederse bilet onay ekranına bile gelmez. Ret nedenleri şunlardır: stop yok, stop yanlış tarafta, spot piyasada short, risk üst sınırın üstünde, gereken teminat özsermayeyi aşıyor, günlük veya haftalık kayıp limiti dolmuş, toplam açık risk sınırı aşılıyor, korelasyonlu grup riski sınırı aşılıyor, likidasyon stop mesafesinin iki katından yakın ya da girişin yanlış tarafında (yalnızca futures), sembol izin listesinde değil, kaldıraç sınırın üstünde, komisyon oranı geçersiz, R:R (komisyon dahil) düşük.
@@ -185,12 +185,21 @@ Görev oturum açıldığında başlar, çökerse 1 dakika sonra yeniden başlar
 ### Canlı panel (`panel`)
 
 ```powershell
-tradeagent panel            # tarayıcıda http://127.0.0.1:8765 açılır
+tradeagent panel            # tarayıcıda http://127.0.0.1:8765 açılır; işlemler yerel paper hesabına
+tradeagent panel --live     # işlemler config'deki canlı/demo hesaba (ayrıca mode: live)
 ```
+
+**Panelden kontrol:**
+
+- **Onay bekleyenler:** geçerlilik süresi dolmamış her bilet burada. "İncele ve onayla" bileti gönderilecek hâliyle gösterir (borsaya göre yuvarlanmış fiyatlar, hesaba göre yeniden hesaplanmış miktar, risk tutarı ve yüzdesi, hedefte kazanç, likidasyon, hesap). Bir kontrol bileti reddederse nedenleri yazılır ve gönder butonu kapalı kalır. Göndermek için kutuya tam olarak `ONAY` yazılır. Sunucu gönderimden hemen önce risk motorunu ve bayat bilet kontrolünü yeniden çalıştırır. "Reddet" bileti göndermeden kapatır.
+- **Girişi iptal et:** gönderilmiş ama dolmamış girişi, stop ve hedefiyle birlikte iptal eder. Giriş o arada dolduysa pozisyon ve koruması olduğu gibi kalır.
+- **Acil durdur:** tüm pozisyonları piyasa emriyle kapatır, kapandığı doğrulanan sembollerin emirlerini iptal eder (`ONAY` ister; `tradeagent kill` ile aynı).
+
+Gerçek para hesabında (`testnet: false` veya `alpaca.paper: false`) panel bunu kırmızıyla gösterir ve her emir yine `ONAY` ister. Panel kapalıyken bile `watch` biletleri bulup bildirmeye devam eder.
 
 Tek ekranda: izlemenin çalışıp çalışmadığı (son ve sonraki tarama, son hata), mod ve hesap, performans (toplam R, beklenti, kazanma oranı, profit factor, en büyük düşüş, özsermaye), kümülatif R eğrisi, **risk tavanı** (açık risk ve bugünkü kayıp, sınırlarına göre), açık pozisyonlar ve bekleyen emirler, bildirim akışı ve son biletler. 10 saniyede bir yenilenir.
 
-Panel **salt okunurdur**: yalnızca bu bilgisayardan (127.0.0.1) açılır, journal'ı salt okunur modda okur, borsaya bağlanmaz ve hiçbir emir veremez. Dış kaynak (yazı tipi, betik) yüklemez.
+Panel yalnızca bu bilgisayardan (127.0.0.1) açılır ve dış kaynak (yazı tipi, betik) yüklemez. Ekranı journal'ı salt okunur modda okuyarak çizer; yalnızca yukarıdaki işlemler için hesaba bağlanır.
 
 ### Kurulum kontrolü ve yardımcı komutlar
 

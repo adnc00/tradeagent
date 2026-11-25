@@ -74,7 +74,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-watch-task.ps1 -Unive
 
 - Görev hemen başlar ve her oturum açılışında yeniden başlar. Çökerse 1 dakika sonra yeniden başlar.
 - Çıktı `data\watch.log` dosyasına yazılır.
-- Canlı paneli açmak için: `python -m tradeagent.cli panel` (tarayıcıda `http://127.0.0.1:8765`).
+- Canlı paneli açmak için: `python -m tradeagent.cli panel --live` (tarayıcıda `http://127.0.0.1:8765`). `--live` ile paneldeki onay, iptal ve acil durdurma demo hesaba gider.
 - Durdurmak ve kaldırmak için: `powershell -ExecutionPolicy Bypass -File .\scripts\install-watch-task.ps1 -Remove`
 - Tüm demo pozisyonları kapatmak için: `python -m tradeagent.cli kill --live` (terminalde `ONAY` ister).
 

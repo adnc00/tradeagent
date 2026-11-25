@@ -2,6 +2,15 @@
 
 Biçim [Keep a Changelog](https://keepachangelog.com/tr-TR/1.1.0/), sürümler [SemVer](https://semver.org/lang/tr/).
 
+## [0.5.0] - 2026-11-25
+
+### Eklendi
+- Panelden kontrol: "Onay bekleyenler" kuyruğu (İncele ve onayla: tam bilet önizlemesi, `ONAY` yazarak gönderim; Reddet), açık emirlerde "Girişi iptal et", üst çubukta "Acil durdur" (`ONAY`). Sunucu tarafında terminalle aynı kontroller; gizli sayfa anahtarı, Origin ve JSON zorunlu; işlemler sırayla.
+- `panel --live`: panel işlemleri canlı/demo hesaba gider (ayrıca `mode: live`).
+
+### Düzeltildi
+- Paneldeki "Onay bekliyor" yalnızca süresi dolmamış biletlerde; eskiler "Süresi doldu". Kuyrukta R:R komisyon dahil.
+
 ## [0.4.0] - 2026-11-25
 
 ### Değişti
