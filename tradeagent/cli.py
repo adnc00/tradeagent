@@ -250,10 +250,14 @@ def apply_result(journal: Journal, ticket: OrderTicket, result) -> None:
     )
 
 
-def record_equity(broker: Broker, journal: Journal) -> None:
+def record_equity(broker: Broker, journal: Journal, goal=None) -> None:
     """Snapshot the account's equity (the daily/weekly loss limits start from the first one of a period)."""
     try:
-        journal.equity_baselines(broker.name, broker.get_balance().equity)
+        real = broker.get_balance().equity
+        journal.equity_baselines(broker.name, real)
+        equity, key = sizing_equity(broker, journal, goal, real)
+        if key != broker.name:
+            journal.equity_baselines(key, equity)
     except Exception as exc:  # bookkeeping only
         print(f"Uyarı: {broker.name} bakiyesi okunamadı ({exc}).")
 
@@ -284,10 +288,19 @@ def refresh(broker: Broker, journal: Journal) -> None:
         reconcile_live_tickets(broker, journal)
 
 
-def account_state(broker: Broker, journal: Journal, exclude: str | None = None) -> AccountState:
+def sizing_equity(broker: Broker, journal: Journal, goal, real_equity: float) -> tuple[float, str]:
+    """(equity used for sizing and limits, snapshot key). A goal turns a remote account into a
+    virtual one: start capital plus net P&L closed since its start, capped by the real balance."""
+    if goal is None or not goal.enabled or isinstance(broker, PaperBroker):
+        return real_equity, broker.name
+    virtual = goal.start_capital + journal.realized_pnl(broker.name, goal.since_moment())
+    return min(real_equity, virtual), f"{broker.name}#sanal"
+
+
+def account_state(broker: Broker, journal: Journal, exclude: str | None = None, goal=None) -> AccountState:
     refresh(broker, journal)
-    equity = broker.get_balance().equity
-    day_start, week_start = journal.equity_baselines(broker.name, equity)
+    equity, key = sizing_equity(broker, journal, goal, broker.get_balance().equity)
+    day_start, week_start = journal.equity_baselines(key, equity)
     open_risks = tuple(
         OpenRisk(t.symbol, t.side, ticket_risk_amount(t))
         for t in journal.open_tickets(broker.name)
@@ -356,7 +369,7 @@ def prepare_ticket(
     ticket: OrderTicket, broker: Broker, journal: Journal, cfg: Config
 ) -> tuple[OrderTicket, AccountState, list[str]]:
     """Venue-rounded, re-sized ticket plus every reason it must not be sent."""
-    state = account_state(broker, journal)
+    state = account_state(broker, journal, goal=cfg.goal)
     prepared = replace(ticket, market=broker.market_type(ticket.symbol, ticket.market))
     if prepared.stop is not None and prepared.targets:
         entry, stop, targets = broker.normalize_prices(
@@ -373,7 +386,7 @@ def prepare_ticket(
 
 def recheck_after_confirmation(ticket: OrderTicket, broker: Broker, journal: Journal, cfg: Config) -> list[str]:
     """Risk engine and stale-ticket guard on exactly the confirmed ticket, with fresh account state."""
-    state = account_state(broker, journal, exclude=ticket.id)
+    state = account_state(broker, journal, exclude=ticket.id, goal=cfg.goal)
     reasons = [v.message for v in check_ticket(ticket, state, cfg.risk)]
     reasons.extend(stale_reasons(ticket, current_price(broker, cfg, ticket.symbol), cfg, datetime.now(UTC)))
     return reasons
@@ -1058,7 +1071,7 @@ def watch_cycle(args: argparse.Namespace, cfg: Config, journal: Journal, channel
     for broker in [b for key, b in brokers.items() if key != "paper"]:
         refresh(broker, journal)
         mark_filled(broker, journal)
-        record_equity(broker, journal)
+        record_equity(broker, journal, cfg.goal)
         for ticket_id in backfill_results(broker, journal):
             print(f"  [{ticket_id}] sonuç borsa işlemlerinden kaydedildi")
     brokers.setdefault("paper", paper_broker(cfg))

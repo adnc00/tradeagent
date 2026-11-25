@@ -201,6 +201,22 @@ Tek ekranda: izlemenin çalışıp çalışmadığı (son ve sonraki tarama, son
 
 Panel yalnızca bu bilgisayardan (127.0.0.1) açılır ve dış kaynak (yazı tipi, betik) yüklemez. Ekranı journal'ı salt okunur modda okuyarak çizer; yalnızca yukarıdaki işlemler için hesaba bağlanır.
 
+### Küçük hesap provası ve hedef (`goal`)
+
+Gerçek hesapta küçük bir sermayeyle başlamadan önce demo hesabı o sermayenin provası olarak kullanmak için:
+
+```yaml
+goal:
+  start_capital: 100     # sanal başlangıç sermayesi (USDT)
+  target: 1000           # hedef (USDT)
+  since: '2026-11-26'    # bu tarihten (İstanbul saati) itibaren kapanan işlemler sayılır
+```
+
+- Demo/canlı hesap, gerçek bakiyesi ne olursa olsun, **sanal özsermaye** = `start_capital` + `since`'ten beri kapanan işlemlerin net K/Z'si kadar parası varmış gibi boyutlanır. Risk yüzdesi, açık risk, günlük ve haftalık kayıp sınırları ve teminat kontrolü bu sanal hesaba göre çalışır. Sanal özsermaye gerçek bakiyeyi asla aşamaz.
+- Böylece demoda küçük hesabın gerçek koşulları görülür: küçük pozisyonlar, komisyonun payı, Binance'ın en küçük emir tutarı (çoğu coinde 5 USDT, BTC'de 50, ETH/LINK/LTC/BCH/ETC'de 20) ve teminat sınırı (1x kaldıraçla 100 USDT'lik hesapta aynı anda en fazla ~100 USDT'lik pozisyon).
+- Panelin **Hedef** kartı: sanal özsermaye, hedefe ilerleme, net K/Z, kapanmış işlem sayısı, beklenti (R) ve bu beklenti ile işlem başına risk sabit kalırsa hedefe tahmini işlem sayısı. 30 işlemden az veriyle tahmin güvenilir değildir; beklenti negatifse "ulaşılamaz" yazar.
+- Paper (yerel simülasyon) hesabı bundan etkilenmez; onun sermayesi `paper.equity`'dir.
+
 ### Kurulum kontrolü ve yardımcı komutlar
 
 ```powershell

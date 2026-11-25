@@ -487,6 +487,18 @@ class Journal:
             if note:
                 self._append_note("tickets", ticket_id, note)
 
+    def realized_pnl(self, broker: str, since: datetime | None) -> float:
+        """Net P&L of ``broker``'s tickets closed at or after ``since`` (all of them when ``None``)."""
+        total = 0.0
+        rows = self._conn.execute(
+            "SELECT closed_at, pnl FROM tickets WHERE broker = ? AND status = 'closed' AND pnl IS NOT NULL", (broker,)
+        )
+        for row in rows:
+            closed = _parse(row["closed_at"])
+            if since is None or (closed is not None and closed >= since):
+                total += float(row["pnl"])
+        return total
+
     def tickets_without_result(self, broker: str) -> list[OrderTicket]:
         """Sent tickets on ``broker`` that closed but have no R recorded yet."""
         rows = self._conn.execute(

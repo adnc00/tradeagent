@@ -13,6 +13,7 @@
 
 import hmac
 import json
+import math
 import secrets
 import sqlite3
 import threading
@@ -87,7 +88,57 @@ def _ticket(row: sqlite3.Row) -> dict[str, Any]:
     return item
 
 
-def _journal_state(path: Path, *, live: bool = False) -> dict[str, Any]:
+def _goal_state(cfg: Config, path: Path, live: bool) -> dict[str, Any]:
+    goal = cfg.goal
+    if not goal.enabled:
+        return {"enabled": False}
+    since = goal.since_moment()
+    pnls: list[float] = []
+    rs: list[float] = []
+    if path.is_file():
+        conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=5)
+        conn.row_factory = sqlite3.Row
+        try:
+            scope = "broker != 'paper'" if live else "broker = 'paper'"
+            rows = conn.execute(
+                f"SELECT closed_at, pnl, result_r FROM tickets WHERE status = 'closed' AND pnl IS NOT NULL AND {scope} "
+                "ORDER BY closed_at"
+            ).fetchall()
+        except sqlite3.DatabaseError:
+            rows = []
+        finally:
+            conn.close()
+        for row in rows:
+            closed = _parse_time(row["closed_at"])
+            if since is None or (closed is not None and closed >= since):
+                pnls.append(float(row["pnl"]))
+                if row["result_r"] is not None:
+                    rs.append(float(row["result_r"]))
+    equity = goal.start_capital + sum(pnls)
+    expectancy = compute_stats(rs).expectancy if rs else None
+    growth = cfg.risk.risk_pct / 100.0 * expectancy if expectancy is not None else None
+    if equity >= goal.target:
+        needed: int | None = 0
+    elif growth is not None and growth > 0 and equity > 0:
+        needed = round(math.log(goal.target / equity) / math.log(1.0 + growth))
+    else:
+        needed = None
+    return {
+        "enabled": True,
+        "start_capital": goal.start_capital,
+        "target": goal.target,
+        "since": goal.since or None,
+        "equity": equity,
+        "pnl": sum(pnls),
+        "progress_pct": (equity - goal.start_capital) / (goal.target - goal.start_capital) * 100.0,
+        "trades": len(pnls),
+        "expectancy": expectancy,
+        "risk_pct": cfg.risk.risk_pct,
+        "trades_needed": needed,
+    }
+
+
+def _journal_state(path: Path, *, live: bool = False, virtual: bool = False) -> dict[str, Any]:
     empty = {"open_tickets": [], "recent_tickets": [], "new_tickets": [], "closed": [], "equity": []}
     if not path.is_file():
         return empty
@@ -110,7 +161,12 @@ def _journal_state(path: Path, *, live: bool = False) -> dict[str, Any]:
             "ORDER BY closed_at, rowid"
         ).fetchall()
         # The equity shown is the account the panel acts on: a remote account when live, the simulator otherwise.
-        preferred = "broker != 'paper'" if live else "broker = 'paper'"
+        if live and virtual:
+            preferred = "broker LIKE '%#sanal'"
+        elif live:
+            preferred = "broker != 'paper' AND broker NOT LIKE '%#sanal'"
+        else:
+            preferred = "broker = 'paper'"
         latest = conn.execute(f"SELECT broker FROM equity_snapshots WHERE {preferred} ORDER BY ts DESC LIMIT 1").fetchone()
         if latest is None:
             latest = conn.execute("SELECT broker FROM equity_snapshots ORDER BY ts DESC LIMIT 1").fetchone()
@@ -161,7 +217,8 @@ def _mark_expiry(ticket: dict[str, Any], cfg: Config, moment: datetime) -> dict[
 def build_state(cfg: Config, now: datetime | None = None, *, live: bool = False) -> dict[str, Any]:
     """Everything the page shows, from files on disk only (no exchange calls)."""
     moment = now if now is not None else datetime.now(UTC)
-    journal = _journal_state(cfg.journal_path, live=cfg.mode == "live" and live)
+    remote = cfg.mode == "live" and live
+    journal = _journal_state(cfg.journal_path, live=remote, virtual=cfg.goal.enabled)
     for key in ("recent_tickets", "new_tickets"):
         journal[key] = [_mark_expiry(t, cfg, moment) for t in journal[key]]
     results = [float(r["result_r"]) for r in journal["closed"]]
@@ -214,6 +271,7 @@ def build_state(cfg: Config, now: datetime | None = None, *, live: bool = False)
             "total_r": stats.total_r,
         },
         "risk": risk,
+        "goal": _goal_state(cfg, cfg.journal_path, remote),
         "account": account_info(cfg, live),
         "awaiting": [t for t in journal["new_tickets"] if not t["expired"]],
         "open_tickets": journal["open_tickets"],

@@ -7,6 +7,8 @@ they come from environment variables, optionally loaded from ``.env``.
 
 import math
 import os
+from datetime import UTC, date, datetime
+from zoneinfo import ZoneInfo
 from dataclasses import MISSING, dataclass, field, fields
 from pathlib import Path
 from typing import Any
@@ -90,6 +92,42 @@ class UniverseConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class GoalConfig:
+    """Small-account rehearsal and goal tracking.
+
+    With ``start_capital`` > 0 a remote (demo/live) account is sized and risk-limited
+    as if it held ``start_capital`` plus the net P&L of the tickets closed since
+    ``since`` (a date, Istanbul time), never more than its real balance.
+    """
+
+    start_capital: float = 0.0
+    target: float = 1000.0
+    since: str = ""
+
+    def __post_init__(self) -> None:
+        if not (math.isfinite(self.start_capital) and self.start_capital >= 0):
+            raise ValueError(f"start_capital 0 (kapalı) veya pozitif olmalı (verilen {self.start_capital!r})")
+        if self.start_capital > 0 and not (math.isfinite(self.target) and self.target > self.start_capital):
+            raise ValueError(f"target başlangıç sermayesinden büyük olmalı (verilen {self.target!r})")
+        if self.since:
+            try:
+                date.fromisoformat(self.since)
+            except ValueError:
+                raise ValueError(f"since YYYY-AA-GG biçiminde bir tarih olmalı (verilen {self.since!r})") from None
+
+    def since_moment(self) -> datetime | None:
+        """``since`` as the UTC moment of midnight in Istanbul; ``None`` when not set."""
+        if not self.since:
+            return None
+        day = date.fromisoformat(self.since)
+        return datetime(day.year, day.month, day.day, tzinfo=ZoneInfo("Europe/Istanbul")).astimezone(UTC)
+
+    @property
+    def enabled(self) -> bool:
+        return self.start_capital > 0
+
+
+@dataclass(frozen=True, slots=True)
 class Config:
     mode: str = "paper"
     data_dir: Path = DEFAULT_DATA_DIR
@@ -101,6 +139,7 @@ class Config:
     paper: PaperConfig = field(default_factory=PaperConfig)
     execution: ExecutionConfig = field(default_factory=ExecutionConfig)
     universe: UniverseConfig = field(default_factory=UniverseConfig)
+    goal: GoalConfig = field(default_factory=GoalConfig)
     source: Path | None = None
 
     @property
@@ -120,6 +159,7 @@ _SECTIONS: dict[str, type] = {
     "paper": PaperConfig,
     "execution": ExecutionConfig,
     "universe": UniverseConfig,
+    "goal": GoalConfig,
 }
 
 

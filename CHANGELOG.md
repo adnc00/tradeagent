@@ -2,6 +2,15 @@
 
 Biçim [Keep a Changelog](https://keepachangelog.com/tr-TR/1.1.0/), sürümler [SemVer](https://semver.org/lang/tr/).
 
+## [0.7.0] - 2026-11-26
+
+### Eklendi
+- `goal` ayarı (küçük hesap provası): demo/canlı hesap `start_capital` + `since`'ten beri kapanan işlemlerin net K/Z'si kadar sanal özsermayeyle boyutlanır ve risk sınırları buna göre ölçülür (gerçek bakiyeyi aşmaz). `watch` sanal özsermayeyi de kaydeder.
+- Panelde **Hedef** kartı: sanal özsermaye, ilerleme, net K/Z, işlem sayısı, beklenti ve hedefe tahmini işlem sayısı.
+
+### Değişti
+- Örnek ayarda komisyon %0,05 (Binance USDⓈ-M taker); önceki %0,1 R'yi olduğundan kötü gösteriyordu.
+
 ## [0.6.0] - 2026-11-26
 
 ### Eklendi

@@ -10,8 +10,9 @@ mode: paper
 # journal.sqlite ve paper_state.json burada tutulur. Göreli yol bu dosyanın klasörüne göre çözülür.
 data_dir: data
 
-# İşlem başına komisyon oranı (0.001 = %0.1, en fazla 0.01). Pozisyon büyüklüğüne ve R:R'ye gidiş-dönüş eklenir.
-fee_rate: 0.001
+# İşlem başına komisyon oranı (0.0005 = %0.05, en fazla 0.01). Pozisyon büyüklüğüne ve R:R'ye gidiş-dönüş eklenir.
+# Binance USDⓈ-M standart: maker %0.02, taker %0.05; stop ve hedef piyasa emri olduğu için %0.05 temkinli değerdir.
+fee_rate: 0.0005
 
 risk:
   risk_pct: 0.5            # işlem başına hedef risk, özsermayenin %'si
@@ -73,3 +74,11 @@ universe:
   min_quote_volume: 10000000   # en az 24s işlem hacmi (USDT); sığ piyasalar elenir
   exclude: []                  # hariç tutulacak semboller veya coinler, ör. [PEPE, 1000SHIB/USDT:USDT]
   coins_only: true             # Binance'ın hisse/emtia/endeks vadelilerini (TradFi) dışarıda bırak
+
+# Küçük hesap provası ve hedef takibi (0 = kapalı).
+# start_capital > 0 iken demo/canlı hesap "start_capital + since tarihinden beri kapanan işlemlerin net K/Z'si"
+# kadar parası varmış gibi boyutlanır (gerçek bakiyeyi asla aşmaz); panelde hedefe ilerleme görünür.
+goal:
+  start_capital: 0
+  target: 1000
+  since: ''
