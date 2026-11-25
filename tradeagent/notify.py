@@ -149,6 +149,29 @@ def ticket_alert(
 # --- channels ---------------------------------------------------------------------------------------------
 
 
+class FileNotifier:
+    """Appends alerts to a JSON-lines file for the panel; keeps roughly the last ``keep`` entries."""
+
+    name = "kayıt"
+
+    def __init__(self, path, *, keep: int = 500) -> None:
+        from pathlib import Path
+
+        self._path = Path(path)
+        self._keep = keep
+
+    def send(self, alert: Alert) -> None:
+        from datetime import UTC, datetime
+
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        row = json.dumps({"at": datetime.now(UTC).isoformat(), "title": alert.title, "body": alert.body}, ensure_ascii=False)
+        with self._path.open("a", encoding="utf-8") as handle:
+            handle.write(row + "\n")
+        lines = self._path.read_text(encoding="utf-8").splitlines()
+        if len(lines) > 2 * self._keep:
+            self._path.write_text("\n".join(lines[-self._keep:]) + "\n", encoding="utf-8")
+
+
 class ConsoleNotifier:
     name = "konsol"
 
@@ -187,6 +210,26 @@ class TelegramNotifier:
         return text.replace(self._token, "<gizli>") if self._token else text
 
 
+def telegram_chats(token: str, *, opener: Callable[..., object] = urllib.request.urlopen) -> list[tuple[str, str]]:
+    """(chat id, label) of everyone who wrote to the bot recently (Bot API ``getUpdates``)."""
+    url = f"https://api.telegram.org/bot{token}/getUpdates"
+    try:
+        with opener(urllib.request.Request(url, method="GET"), timeout=TELEGRAM_TIMEOUT) as response:
+            payload = json.loads(response.read() or b"{}")
+    except Exception as exc:
+        raise NotifyError(f"getUpdates başarısız ({type(exc).__name__}: {exc})".replace(token, "<gizli>")) from None
+    if not payload.get("ok"):
+        raise NotifyError(f"API reddetti: {payload.get('description', 'bilinmeyen hata')}".replace(token, "<gizli>"))
+    chats: dict[str, str] = {}
+    for update in payload.get("result", []):
+        for key in ("message", "edited_message", "channel_post", "my_chat_member"):
+            chat = (update.get(key) or {}).get("chat")
+            if chat and "id" in chat:
+                name = chat.get("title") or " ".join(filter(None, [chat.get("first_name"), chat.get("last_name")])) or chat.get("username") or "?"
+                chats.setdefault(str(chat["id"]), f"{name} ({chat.get('type', '?')})")
+    return list(chats.items())
+
+
 class DesktopNotifier:
     """Windows toast through Windows PowerShell; the text travels in environment variables."""
 
@@ -213,13 +256,18 @@ class DesktopNotifier:
             raise NotifyError(f"gösterilemedi: {detail[0][:200]}")
 
 
+def telegram_settings(env: Mapping[str, str] | None = None) -> tuple[str, str]:
+    """(bot token, chat id) from the environment / ``.env``; empty strings when unset."""
+    source = os.environ if env is None else env
+    return source.get("TELEGRAM_BOT_TOKEN", "").strip(), source.get("TELEGRAM_CHAT_ID", "").strip()
+
+
 def notifiers_from_env(
     env: Mapping[str, str] | None = None, *, platform: str = sys.platform, desktop: bool = True
 ) -> list:
     """Console always; Telegram when both variables are set; desktop toast on Windows unless ``desktop`` is off."""
-    source = os.environ if env is None else env
     channels: list = [ConsoleNotifier()]
-    token, chat_id = source.get("TELEGRAM_BOT_TOKEN", "").strip(), source.get("TELEGRAM_CHAT_ID", "").strip()
+    token, chat_id = telegram_settings(env)
     if token and chat_id:
         channels.append(TelegramNotifier(token, chat_id))
     if platform == "win32" and desktop:

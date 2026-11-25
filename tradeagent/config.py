@@ -68,6 +68,24 @@ class ExecutionConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class UniverseConfig:
+    """``--universe``: which pairs of the crypto exchange are scanned (24h quote volume ranking)."""
+
+    quote: str = "USDT"
+    top: int = 100
+    min_quote_volume: float = 10_000_000.0
+    exclude: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not 0 <= self.top <= 1000:
+            raise ValueError(f"top 0 (sınırsız) ile 1000 arasında olmalı (verilen {self.top!r})")
+        if not (math.isfinite(self.min_quote_volume) and self.min_quote_volume >= 0):
+            raise ValueError(f"min_quote_volume 0 veya pozitif olmalı (verilen {self.min_quote_volume!r})")
+        if not self.quote.strip():
+            raise ValueError("quote boş olamaz")
+
+
+@dataclass(frozen=True, slots=True)
 class Config:
     mode: str = "paper"
     data_dir: Path = DEFAULT_DATA_DIR
@@ -78,6 +96,7 @@ class Config:
     alpaca: AlpacaConfig = field(default_factory=AlpacaConfig)
     paper: PaperConfig = field(default_factory=PaperConfig)
     execution: ExecutionConfig = field(default_factory=ExecutionConfig)
+    universe: UniverseConfig = field(default_factory=UniverseConfig)
     source: Path | None = None
 
     @property
@@ -96,6 +115,7 @@ _SECTIONS: dict[str, type] = {
     "alpaca": AlpacaConfig,
     "paper": PaperConfig,
     "execution": ExecutionConfig,
+    "universe": UniverseConfig,
 }
 
 
@@ -215,6 +235,11 @@ def load_config(path: str | Path | None = None, *, default_path: Path = DEFAULT_
     if not sections["paper"].equity > 0:
         raise ConfigError("paper.equity sıfırdan büyük olmalı.")
     return Config(mode=mode, data_dir=data_dir, fee_rate=fee_rate, source=config_path, **sections)
+
+
+def env_is_set(name: str) -> bool:
+    """Whether an environment variable has a non-empty value (the value itself is never returned)."""
+    return bool(os.environ.get(name, "").strip())
 
 
 def _dotenv_value(value: str) -> str | None:

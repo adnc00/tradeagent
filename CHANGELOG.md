@@ -2,6 +2,17 @@
 
 Biçim [Keep a Changelog](https://keepachangelog.com/tr-TR/1.1.0/), sürümler [SemVer](https://semver.org/lang/tr/).
 
+## [0.3.0] - 2026-11-25
+
+### Eklendi
+- `--universe` (`scan`, `watch`): Binance'taki tüm pariteleri 24s hacme göre tarar; `universe` ayar bölümü (`quote`, `top`, `min_quote_volume`, `exclude`), `--top`.
+- `risk.allowlist` desen kabul eder (ör. `'*/USDT:USDT'`).
+- `panel`: salt okunur yerel canlı panel (izleme durumu, performans, R eğrisi, risk tavanı, pozisyonlar, bildirimler, biletler).
+- `check`, `notify-test`, `telegram-chatid` komutları.
+- `docs/TELEGRAM.md` ve `docs/DEMO-HESAP.md` kurulum rehberleri.
+- İzleme her turda `data/watch_status.json` durum dosyasını ve `data/alerts.jsonl` bildirim kaydını yazar.
+- Görev Zamanlayıcı betiğine `-Universe` ve `-Top`.
+
 ## [0.2.0] - 2026-11-25
 
 ### Eklendi

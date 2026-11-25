@@ -21,6 +21,7 @@ Safety rules enforced here:
 """
 
 import argparse
+import json
 import math
 import sys
 import time
@@ -30,11 +31,11 @@ from pathlib import Path
 
 import pandas as pd
 
-from tradeagent import notify
+from tradeagent import notify, panel, universe
 from tradeagent.brokers.base import Broker, BrokerError, OrderResult, OrderStateUnknown
-from tradeagent.brokers.data import MarketData, asset_class, market_type
+from tradeagent.brokers.data import DERIVATIVE_EXCHANGES, MarketData, asset_class, market_type
 from tradeagent.brokers.paper import PaperBroker
-from tradeagent.config import DEFAULT_ENV_PATH, Config, ConfigError, load_config, load_dotenv
+from tradeagent.config import DEFAULT_ENV_PATH, Config, ConfigError, env_is_set, load_config, load_dotenv
 from tradeagent.journal import Journal, JournalError
 from tradeagent.models import AccountState, OpenRisk, OrderTicket, Setup
 from tradeagent.notify import DISCLAIMER, ISTANBUL, money, num, quote_currency
@@ -44,6 +45,7 @@ from tradeagent.risk import (
     liquidation_price,
     lot_step,
     position_size,
+    symbol_allowed,
     ticket_metrics,
     ticket_risk_amount,
 )
@@ -390,8 +392,13 @@ def closed_candles(df: pd.DataFrame, timeframe: str, now: datetime) -> pd.DataFr
 # --- commands --------------------------------------------------------------------------------------------------
 
 
-def run_scan(symbols: list[str], tf: str, htf: str, limit: int, cfg: Config, journal: Journal) -> list[Setup]:
-    """Scan, journal and print every setup; returns the ones evaluated now (not already acted on)."""
+def run_scan(
+    symbols: list[str], tf: str, htf: str, limit: int, cfg: Config, journal: Journal, *, quiet: bool = False
+) -> list[Setup]:
+    """Scan, journal and print every setup; returns the ones evaluated now (not already acted on).
+
+    ``quiet`` hides the per-symbol "no setup" lines (useful when scanning hundreds of pairs).
+    """
     data = MarketData(cfg.crypto.exchange)
     broker = paper_broker(cfg)
     state = account_state(broker, journal)
@@ -421,7 +428,8 @@ def run_scan(symbols: list[str], tf: str, htf: str, limit: int, cfg: Config, jou
             print(f"{symbol}: veri reddedildi ({exc})")
             continue
         if not setups:
-            print(f"{symbol} {tf}: kurulum yok.")
+            if not quiet:
+                print(f"{symbol} {tf}: kurulum yok.")
             continue
         print(f"{symbol} {tf}: {len(setups)} kurulum")
         for setup in setups:
@@ -432,7 +440,31 @@ def run_scan(symbols: list[str], tf: str, htf: str, limit: int, cfg: Config, jou
                 continue
             print_setup(setup)
             evaluated.append(setup)
+    if quiet:
+        print(f"{len(symbols)} sembol tarandı, {len(evaluated)} yeni değerlendirme.")
     return evaluated
+
+
+def resolve_symbols(args: argparse.Namespace, cfg: Config) -> list[str]:
+    """``--symbols`` as given, or the ``--universe`` ranking filtered by the allowlist."""
+    if not getattr(args, "universe", False):
+        return parse_symbols(args.symbols)
+    settings = cfg.universe
+    top = args.top if getattr(args, "top", None) is not None else settings.top
+    ranked = universe.top_symbols(
+        MarketData(cfg.crypto.exchange).ccxt_client(),
+        derivatives=cfg.crypto.exchange in DERIVATIVE_EXCHANGES,
+        quote=settings.quote,
+        top=top,
+        min_quote_volume=settings.min_quote_volume,
+        exclude=settings.exclude,
+    )
+    allowed = [s for s in ranked if symbol_allowed(s, cfg.risk.allowlist)]
+    print(
+        f"Universe ({cfg.crypto.exchange}, {settings.quote}): {len(ranked)} parite, "
+        f"izin listesine uyan {len(allowed)} taranacak."
+    )
+    return allowed
 
 
 def parse_symbols(text: str) -> list[str]:
@@ -443,14 +475,13 @@ def cmd_scan(args: argparse.Namespace, cfg: Config) -> int:
     if not 1 <= args.limit <= MAX_CANDLES:
         print(f"Hata: --limit 1 ile {MAX_CANDLES} arasında olmalı (borsa tek istekte en fazla {MAX_CANDLES} mum verir).")
         return EXIT_REJECTED
-    symbols = parse_symbols(args.symbols)
     if not cfg.risk.allowlist:
         print("Uyarı: risk.allowlist boş; hiçbir kurulum bilete dönüşmez (config.example.yaml'a bakın).")
     if cfg.mode == "live":
         print("Not: tarama paper hesabına göre boyutlandırır; execute --live miktarı canlı hesaba göre yeniden hesaplar.")
     journal = Journal(cfg.journal_path)
     try:
-        run_scan(symbols, args.tf, args.htf, args.limit, cfg, journal)
+        run_scan(resolve_symbols(args, cfg), args.tf, args.htf, args.limit, cfg, journal, quiet=args.universe)
         print(DISCLAIMER)
         return EXIT_OK
     finally:
@@ -870,12 +901,13 @@ def _send(channels: list, alert: notify.Alert) -> None:
         print(f"Uyarı: bildirim gönderilemedi - {error}")
 
 
-def watch_cycle(args: argparse.Namespace, cfg: Config, journal: Journal, channels: list) -> None:
+def watch_cycle(args: argparse.Namespace, cfg: Config, journal: Journal, channels: list) -> int:
     """One wake-up: scan, report fills/closures, then alert (or demo-auto-send) every new ticket."""
     live = live_enabled(cfg, args.live)
     stamp = datetime.now(UTC).astimezone(ISTANBUL)
     print(f"--- tarama {stamp:%d.%m.%Y %H:%M} (Türkiye saati) ---")
-    fresh = run_scan(parse_symbols(args.symbols), args.tf, args.htf, args.limit, cfg, journal)
+    symbols = resolve_symbols(args, cfg)
+    fresh = run_scan(symbols, args.tf, args.htf, args.limit, cfg, journal, quiet=args.universe)
     brokers: dict[str, Broker] = {}
 
     def live_for(symbol: str) -> bool:
@@ -887,7 +919,7 @@ def watch_cycle(args: argparse.Namespace, cfg: Config, journal: Journal, channel
             brokers[key] = make_broker(cfg, symbol, live_for(symbol))
         return brokers[key]
 
-    for symbol in parse_symbols(args.symbols):
+    for symbol in symbols:
         if live_for(symbol):
             broker_for(symbol)
     for broker in [b for key, b in brokers.items() if key != "paper"]:
@@ -951,6 +983,19 @@ def watch_cycle(args: argparse.Namespace, cfg: Config, journal: Journal, channel
         )
         alert = notify.ticket_alert(prepared, equity=state.equity, action=action, **details)
         _send(channels, alert)
+    return len(symbols)
+
+
+def write_watch_status(cfg: Config, status: dict) -> None:
+    """Heartbeat for the panel (atomic replace; a failure here never stops the watch)."""
+    try:
+        cfg.data_dir.mkdir(parents=True, exist_ok=True)
+        target = cfg.data_dir / panel.STATUS_FILE
+        temporary = target.with_suffix(".tmp")
+        temporary.write_text(json.dumps(status, ensure_ascii=False, default=str), encoding="utf-8")
+        temporary.replace(target)
+    except OSError as exc:
+        print(f"Uyarı: durum dosyası yazılamadı ({exc}).")
 
 
 def cmd_watch(args: argparse.Namespace, cfg: Config) -> int:
@@ -964,7 +1009,13 @@ def cmd_watch(args: argparse.Namespace, cfg: Config) -> int:
     if not 1 <= args.limit <= MAX_CANDLES:
         print(f"Hata: --limit 1 ile {MAX_CANDLES} arasında olmalı.")
         return EXIT_REJECTED
-    symbols = parse_symbols(args.symbols)
+    if args.universe:
+        # Universe members are only known at scan time; validate the venue kind they belong to.
+        symbols = [f"*/{cfg.universe.quote}" + (f":{cfg.universe.quote}" if cfg.crypto.exchange in DERIVATIVE_EXCHANGES else "")]
+        label = f"Binance universe ({cfg.crypto.exchange}, {cfg.universe.quote}, ilk {args.top if args.top is not None else cfg.universe.top})"
+    else:
+        symbols = parse_symbols(args.symbols)
+        label = ", ".join(symbols)
     if not symbols:
         print("Hata: en az bir sembol verin (--symbols).")
         return EXIT_REJECTED
@@ -980,7 +1031,7 @@ def cmd_watch(args: argparse.Namespace, cfg: Config) -> int:
                 print(f"  - {problem}")
             return EXIT_REJECTED
     load_dotenv(_env_path(cfg))  # Telegram credentials (and API keys for --live)
-    channels = notify.notifiers_from_env(desktop=not args.no_desktop)
+    channels = [*notify.notifiers_from_env(desktop=not args.no_desktop), notify.FileNotifier(cfg.data_dir / panel.ALERTS_FILE)]
     if args.demo_auto:
         behaviour = "DEMO OTOMATİK: uygun bilet onay beklemeden demo/paper hesaba gönderilir"
     else:
@@ -990,18 +1041,33 @@ def cmd_watch(args: argparse.Namespace, cfg: Config) -> int:
         channels,
         notify.Alert(
             "tradeagent izleme başladı",
-            f"Semboller: {', '.join(symbols)}\nZaman dilimi: {args.tf} (bias {args.htf}), her {interval} dk\n"
+            f"Semboller: {label}\nZaman dilimi: {args.tf} (bias {args.htf}), her {interval} dk\n"
             f"Mod: {behaviour}\nHesap: {account}\nKanallar: {', '.join(c.name for c in channels)}",
         ),
     )
     journal = Journal(cfg.journal_path)
     failing = False
+    status = {
+        "started_at": datetime.now(UTC).isoformat(),
+        "mode": "demo-auto" if args.demo_auto else "bildirim",
+        "account": account,
+        "targets": label,
+        "timeframe": args.tf,
+        "interval_minutes": interval,
+        "cycles": 0,
+        "scanned": None,
+        "last_cycle_at": None,
+        "next_wake_at": None,
+        "last_error": None,
+    }
     try:
         while True:
             try:
-                watch_cycle(args, cfg, journal, channels)
+                status["scanned"] = watch_cycle(args, cfg, journal, channels)
+                status["last_error"] = None
                 failing = False
             except Exception as exc:  # one bad wake-up must not end a 24/7 watch
+                status["last_error"] = f"{type(exc).__name__}: {exc}"
                 print(f"Tarama hatası ({type(exc).__name__}): {exc}")
                 if not failing:
                     _send(
@@ -1012,10 +1078,12 @@ def cmd_watch(args: argparse.Namespace, cfg: Config) -> int:
                         ),
                     )
                 failing = True
-            if args.once:
-                return EXIT_ABORTED if failing else EXIT_OK
             now = datetime.now(UTC)
             wake = next_wake(now, interval)
+            status.update(cycles=status["cycles"] + 1, last_cycle_at=now.isoformat(), next_wake_at=None if args.once else wake.isoformat())
+            write_watch_status(cfg, status)
+            if args.once:
+                return EXIT_ABORTED if failing else EXIT_OK
             print(f"Sonraki tarama: {wake.astimezone(ISTANBUL):%H:%M:%S} (Türkiye saati). Durdurmak için Ctrl+C.")
             _sleep(max(0.0, (wake - now).total_seconds()))
     except KeyboardInterrupt:
@@ -1023,6 +1091,129 @@ def cmd_watch(args: argparse.Namespace, cfg: Config) -> int:
         return EXIT_OK
     finally:
         journal.close()
+
+
+def cmd_check(args: argparse.Namespace, cfg: Config) -> int:
+    """Readiness report. Shows which settings and keys are present, never their values."""
+    env_path = _env_path(cfg)
+    load_dotenv(env_path)
+    from tradeagent.brokers.ccxt_broker import api_key_names
+
+    exchange = cfg.crypto.exchange
+    key_var, secret_var = api_key_names(exchange)
+    keys_ok = env_is_set(key_var) and env_is_set(secret_var)
+    token, chat_id = notify.telegram_settings()
+    telegram_ok = bool(token and chat_id)
+    live_route = exchange == "binanceusdm"
+    account = "demo trading (sanal para)" if cfg.crypto.testnet else "GERÇEK PARA"
+    rows = [
+        ("Ayar dosyası", str(cfg.source) if cfg.source else "yok (varsayılanlar)"),
+        ("Mod", f"{cfg.mode}" + ("  (canlı/demo hesap için komutlara ayrıca --live)" if cfg.mode == "live" else "  (yerel simülasyon)")),
+        ("Kripto borsası", f"{exchange}  [{account}]" + ("" if live_route else "  - canlı/demo emir yalnızca binanceusdm ile")),
+        ("Veri klasörü", str(cfg.data_dir)),
+        ("İzin listesi", ", ".join(cfg.risk.allowlist) or "BOŞ - hiçbir bilet üretilmez"),
+        ("Universe", f"{cfg.universe.quote}, ilk {cfg.universe.top or 'tümü'}, en az {money(cfg.universe.min_quote_volume)} 24s hacim"),
+        ("Risk", f"işlem başı %{cfg.risk.risk_pct}, günlük kayıp %{cfg.risk.daily_loss_pct}, açık risk %{cfg.risk.max_open_risk_pct}, kaldıraç ≤{num(cfg.risk.max_leverage)}x"),
+        (".env", f"{env_path} ({'var' if env_path.is_file() else 'YOK'})"),
+        (f"{key_var}/_SECRET", "tanımlı" if keys_ok else "eksik"),
+        ("Telegram", "tanımlı" if telegram_ok else ("token var, chat id eksik" if token else "eksik")),
+    ]
+    for label, value in rows:
+        print(f"{label:<22}: {value}")
+    todo = []
+    if not cfg.risk.allowlist:
+        todo.append("config.yaml -> risk.allowlist doldurun (tüm USDT-M vadeliler için '*/USDT:USDT').")
+    if not telegram_ok:
+        todo.append("Telegram: docs/TELEGRAM.md adımlarını izleyin (tradeagent telegram-chatid yardımcı olur).")
+    if cfg.mode == "live" and not keys_ok:
+        todo.append(f".env -> {key_var} ve {secret_var} (Binance Demo Trading anahtarları) girin.")
+    status = EXIT_OK
+    if args.live:
+        if not live_enabled(cfg, True):
+            print("Hesap bağlantısı    : mode: paper olduğu için canlı/demo hesap denenmedi.")
+        else:
+            try:
+                broker = make_broker(cfg, "BTC/USDT:USDT", True)
+                balance = broker.get_balance()
+                print(f"Hesap bağlantısı    : OK - {broker.name} ({broker.environment}), özsermaye {money(balance.equity)} {balance.currency}")
+            except Exception as exc:  # report, never raise: this is a diagnostic
+                print(f"Hesap bağlantısı    : BAŞARISIZ - {exc}")
+                status = EXIT_ABORTED
+    if todo:
+        print("Yapılacaklar:")
+        for item in todo:
+            print(f"  - {item}")
+    else:
+        print("Hazır görünüyor. Bildirim denemesi: tradeagent notify-test")
+    return status
+
+
+def cmd_notify_test(args: argparse.Namespace, cfg: Config) -> int:
+    load_dotenv(_env_path(cfg))
+    channels = notify.notifiers_from_env(desktop=not args.no_desktop)
+    sample = OrderTicket(
+        id="t-ornek", setup_id="s-ornek", symbol="BTC/USDT:USDT", side="long", entry=100_000.0, stop=99_000.0,
+        targets=[103_000.0], qty=0.05, leverage=2.0, risk_pct=0.5, fee_rate=cfg.fee_rate, market="futures",
+        timeframe="15m", created_at=datetime.now(UTC),
+    )
+    stats = notify_empty_stats()
+    if cfg.journal_path.exists():
+        journal = Journal(cfg.journal_path)
+        try:
+            stats = journal.stats()
+        finally:
+            journal.close()
+    alert = notify.ticket_alert(
+        sample, equity=10_000.0, mmr=cfg.risk.mmr, stats=stats,
+        narrative="Örnek bildirim - gerçek bir kurulum DEĞİL.", killzone=None,
+        valid_minutes=cfg.execution.ticket_max_age_minutes,
+        action="Bu bir TEST mesajıdır; hiçbir emir yok.", headline="TEST bildirimi",
+    )
+    sent, errors = notify.broadcast(channels, alert)
+    print(f"Gönderildi: {', '.join(sent) or '-'}")
+    for error in errors:
+        print(f"HATA: {error}")
+    return EXIT_ABORTED if errors else EXIT_OK
+
+
+def notify_empty_stats():
+    from tradeagent.journal import compute_stats
+
+    return compute_stats([])
+
+
+def cmd_panel(args: argparse.Namespace, cfg: Config) -> int:
+    if not 0 <= args.port <= 65535:
+        print("Hata: --port 0 ile 65535 arasında olmalı.")
+        return EXIT_REJECTED
+    try:
+        panel.serve(cfg, args.port, open_browser=not args.no_browser)
+    except OSError as exc:
+        print(f"Panel başlatılamadı ({exc}). Port kullanımda olabilir: --port ile başka bir port deneyin.")
+        return EXIT_ABORTED
+    except KeyboardInterrupt:
+        print("Panel kapatıldı.")
+    return EXIT_OK
+
+
+def cmd_telegram_chatid(args: argparse.Namespace, cfg: Config) -> int:
+    load_dotenv(_env_path(cfg))
+    token, _ = notify.telegram_settings()
+    if not token:
+        print(f"TELEGRAM_BOT_TOKEN bulunamadı. Önce {_env_path(cfg)} dosyasına yazın (docs/TELEGRAM.md, adım 2).")
+        return EXIT_ABORTED
+    try:
+        chats = notify.telegram_chats(token)
+    except notify.NotifyError as exc:
+        print(f"Hata: {exc}")
+        return EXIT_ABORTED
+    if not chats:
+        print("Henüz mesaj yok. Telegram'da botunuza bir mesaj (ör. 'merhaba') gönderip bu komutu tekrar çalıştırın.")
+        return EXIT_ABORTED
+    print("Bota yazan sohbetler (TELEGRAM_CHAT_ID olarak birini .env'e yazın):")
+    for chat_id, label in chats:
+        print(f"  {chat_id:<16} {label}")
+    return EXIT_OK
 
 
 # --- entry point --------------------------------------------------------------------------------------------
@@ -1037,7 +1228,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     scan = sub.add_parser("scan", help="sembolleri tarayıp kurulum ve bilet üretir")
-    scan.add_argument("--symbols", required=True, help="virgülle ayrılmış, ör. BTC/USDT,ETH/USDT,THYAO.IS,AAPL")
+    scan_targets = scan.add_mutually_exclusive_group(required=True)
+    scan_targets.add_argument("--symbols", help="virgülle ayrılmış, ör. BTC/USDT,ETH/USDT,THYAO.IS,AAPL")
+    scan_targets.add_argument("--universe", action="store_true", help="Binance'taki tüm pariteler (24s hacme göre; config 'universe' ve risk.allowlist ile süzülür)")
+    scan.add_argument("--top", type=int, help="universe: en yüksek hacimli kaç parite (0 = hepsi; varsayılan config)")
     scan.add_argument("--tf", default="15m", help="giriş zaman dilimi (varsayılan 15m)")
     scan.add_argument("--htf", default="1d", help="bias zaman dilimi (varsayılan 1d)")
     scan.add_argument("--limit", type=int, default=300, help=f"indirilecek mum sayısı (1-{MAX_CANDLES}, varsayılan 300)")
@@ -1057,8 +1251,23 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("stats", help="journal'dan R bazlı istatistikler")
 
+    check = sub.add_parser("check", help="kurulum kontrolü: ayarlar, anahtarlar (değerleri gösterilmez), Telegram")
+    check.add_argument("--live", action="store_true", help="canlı/demo hesaba bağlanıp bakiyeyi okumayı da dene")
+
+    notify_test = sub.add_parser("notify-test", help="tüm bildirim kanallarına örnek bir mesaj gönderir")
+    notify_test.add_argument("--no-desktop", action="store_true", help="Windows masaüstü bildirimini kapat")
+
+    sub.add_parser("telegram-chatid", help="botunuza yazan sohbetlerin chat id'lerini listeler")
+
+    panel_cmd = sub.add_parser("panel", help="canlı izleme paneli: http://127.0.0.1:8765 (salt okunur)")
+    panel_cmd.add_argument("--port", type=int, default=panel.DEFAULT_PORT, help=f"port (varsayılan {panel.DEFAULT_PORT})")
+    panel_cmd.add_argument("--no-browser", action="store_true", help="tarayıcıyı otomatik açma")
+
     watch = sub.add_parser("watch", help="7/24 izleme: periyodik tarama + bildirim (demo'da isteğe bağlı otomatik)")
-    watch.add_argument("--symbols", required=True, help="virgülle ayrılmış, ör. BTC/USDT:USDT,ETH/USDT:USDT")
+    watch_targets = watch.add_mutually_exclusive_group(required=True)
+    watch_targets.add_argument("--symbols", help="virgülle ayrılmış, ör. BTC/USDT:USDT,ETH/USDT:USDT")
+    watch_targets.add_argument("--universe", action="store_true", help="Binance'taki tüm pariteler (24s hacme göre; config 'universe' ve risk.allowlist ile süzülür)")
+    watch.add_argument("--top", type=int, help="universe: en yüksek hacimli kaç parite (0 = hepsi; varsayılan config)")
     watch.add_argument("--tf", default="15m", help="giriş zaman dilimi (varsayılan 15m)")
     watch.add_argument("--htf", default="1d", help="bias zaman dilimi (varsayılan 1d)")
     watch.add_argument("--limit", type=int, default=300, help=f"indirilecek mum sayısı (1-{MAX_CANDLES})")
@@ -1090,6 +1299,10 @@ COMMANDS = {
     "kill": cmd_kill,
     "stats": cmd_stats,
     "watch": cmd_watch,
+    "check": cmd_check,
+    "notify-test": cmd_notify_test,
+    "telegram-chatid": cmd_telegram_chatid,
+    "panel": cmd_panel,
     "risk-calc": cmd_risk_calc,
 }
 

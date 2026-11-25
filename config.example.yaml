@@ -24,7 +24,9 @@ risk:
   mmr: 0.01                # likidasyon tahmini için bakım marjin oranı (borsanın kademesine göre ayarlayın)
   liq_stop_multiple: 2.0   # likidasyon mesafesi en az stop mesafesinin bu katı olmalı
   # Yalnızca bu semboller için bilet üretilir. Futures için ccxt biçimi: BTC/USDT:USDT
+  # Desen kullanılabilir: '*/USDT:USDT' = tüm USDT-M sürekli vadeliler (--universe için).
   allowlist:
+    - '*/USDT:USDT'
     - BTC/USDT
     - ETH/USDT
     - THYAO.IS
@@ -60,3 +62,11 @@ paper:
   equity: 10000            # yerel simülasyonun başlangıç özsermayesi
   sync: true               # true: bekleyen paper emirleri herkese açık mum verisiyle ilerletilir
   sync_timeframe: 5m
+
+# --universe: Binance'taki tüm pariteler 24 saatlik hacme göre sıralanır, risk.allowlist'e uyanlar taranır.
+# binanceusdm ile USDT-M sürekli vadeliler (BTC/USDT:USDT ...), binance ile spot pariteler.
+universe:
+  quote: USDT                  # kotasyon / teminat para birimi
+  top: 100                     # en yüksek hacimli kaç parite (0 = hepsi, ~400; tarama uzar)
+  min_quote_volume: 10000000   # en az 24s işlem hacmi (USDT); sığ piyasalar elenir
+  exclude: []                  # hariç tutulacak semboller veya coinler, ör. [PEPE, 1000SHIB/USDT:USDT]

@@ -101,6 +101,10 @@ class MarketData:
         self.crypto_exchange = crypto_exchange
         self._ccxt_client = ccxt_client
 
+    def ccxt_client(self) -> Any:
+        """The public (key-less) ccxt client, e.g. for market listings."""
+        return self._client()
+
     def _client(self) -> Any:
         if self._ccxt_client is None:
             import ccxt

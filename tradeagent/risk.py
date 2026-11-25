@@ -9,6 +9,7 @@ skill:
 * correlated positions count as one position.
 """
 
+import fnmatch
 import math
 import numbers
 from dataclasses import dataclass
@@ -205,6 +206,12 @@ def _loss_pct(start_equity: float | None, equity: float) -> float:
     return max(0.0, (start - equity) / start * 100.0)
 
 
+def symbol_allowed(symbol: str, allowlist: tuple[str, ...] | list[str]) -> bool:
+    """Exact (case-insensitive) match or a shell-style pattern, e.g. ``*/USDT:USDT`` = every USDT-M perpetual."""
+    upper = symbol.upper()
+    return any(fnmatch.fnmatchcase(upper, entry.strip().upper()) for entry in allowlist if entry.strip())
+
+
 def check_ticket(ticket: OrderTicket, account_state: AccountState, limits: RiskLimits) -> list[RiskViolation]:
     """Return every reason the ticket must not be sent; an empty list means it passes.
 
@@ -220,7 +227,7 @@ def check_ticket(ticket: OrderTicket, account_state: AccountState, limits: RiskL
     def reject(code: str, message: str) -> None:
         violations.append(RiskViolation(code, message))
 
-    if ticket.symbol not in limits.allowlist:
+    if not symbol_allowed(ticket.symbol, limits.allowlist):
         reject("symbol_not_allowed", f"{ticket.symbol} izin listesinde (allowlist) değil.")
 
     entry_ok = is_positive(ticket.entry)

@@ -5,4 +5,4 @@ exact confirmation word in the terminal; the only unattended path is
 ``watch --demo-auto``, which runs on demo/paper accounts only. See ``tradeagent.cli``.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

@@ -286,7 +286,7 @@ def test_parser_offers_no_confirmation_bypass():
     assert every_option <= {
         "-h", "--help", "--live", "--symbols", "--tf", "--htf", "--limit",
         "--equity", "--risk", "--entry", "--stop", "--leverage", "--side",
-        "--interval", "--once", "--no-desktop", "--demo-auto",
+        "--interval", "--once", "--no-desktop", "--demo-auto", "--universe", "--top", "--port", "--no-browser",
     }
     # The only unattended path is watch --demo-auto, and it is demo-only (tests/test_watch.py).
     assert {name for name, p in subparsers.choices.items() if "--demo-auto" in _options(p)} == {"watch"}

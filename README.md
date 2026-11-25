@@ -7,8 +7,11 @@
 
 | Klasör / dosya | Görevi |
 |---|---|
-| `tradeagent/cli.py` | Komutlar: `scan`, `plan`, `execute`, `positions`, `kill`, `stats`, `risk-calc`, `watch` |
-| `tradeagent/notify.py` | Bildirim metni ve kanallar: konsol, Telegram, Windows bildirimi |
+| `tradeagent/cli.py` | Komutlar: `scan`, `plan`, `execute`, `positions`, `kill`, `stats`, `risk-calc`, `watch`, `panel`, `check`, `notify-test`, `telegram-chatid` |
+| `tradeagent/notify.py` | Bildirim metni ve kanallar: konsol, Telegram, Windows bildirimi, panel kaydı |
+| `tradeagent/universe.py` | `--universe`: borsadaki tüm pariteler, hacme göre |
+| `tradeagent/panel.py`, `panel.html` | Salt okunur canlı panel (yerel web sunucusu) |
+| `docs/` | Telegram ve Binance Demo Trading kurulum rehberleri |
 | `tradeagent/ict.py` | ICT dedektörleri: swing, FVG, likidite, MSS, daily bias, killzone |
 | `tradeagent/scanner.py` | Mumlardan kurulum → risk motoru → bilet |
 | `tradeagent/risk.py` | Pozisyon büyüklüğü, likidasyon, ön-işlem kontrolleri |
@@ -130,14 +133,25 @@ python examples/paper_demo.py
 - Bildirilen biletin girişi dolunca ve işlem kapanınca (R sonucu, K/Z, toplam istatistik) yine haber verir.
 - Aynı bileti iki kez bildirmez (journal'daki `notifications` tablosu). Bir tarama hata verirse izleme durmaz; hatayı bir kez bildirir ve sonraki uyanışta yeniden dener.
 
+**Hızlı başlangıç:** Binance Demo Trading'de tam otomatik kurulum için [docs/DEMO-HESAP.md](docs/DEMO-HESAP.md), telefona bildirim için [docs/TELEGRAM.md](docs/TELEGRAM.md).
+
+### Tüm Binance coinleri (`--universe`)
+
+`--symbols` yerine `--universe` verilirse borsadaki bütün pariteler 24 saatlik işlem hacmine göre sıralanır ve en hacimli `universe.top` tanesi (varsayılan 100) taranır. `crypto.exchange: binanceusdm` ise USDT-M sürekli vadeliler (`BTC/USDT:USDT` …), `binance` ise spot pariteler gelir. Stabil coinler (USDC, FDUSD …), pasif pariteler, `universe.min_quote_volume` (10 milyon USDT) altı hacimliler ve `universe.exclude` listesi elenir. Bilet yalnızca `risk.allowlist`'e uyan sembollerde üretilir; allowlist desen kabul eder: `'*/USDT:USDT'` tüm USDT-M vadelileri kapsar. Liste her uyanışta yenilenir. 100 parite yaklaşık 1-1,5 dakikada taranır.
+
+Tüm USDT kriptolar aynı korelasyon grubunda sayılır: aynı anda açık olabilecek toplam kripto riski `risk.max_risk_pct` (%1) ile sınırlıdır. Yani çok sayıda coinde aynı anda fırsat çıksa bile ajan ancak birkaçına girer; piyasa birlikte düşerken çok sayıda pozisyonun birden zarar etmesi böyle önlenir.
+
 ```powershell
 # Bildirim modu: hiçbir emir göndermez, yalnızca haber verir
 tradeagent watch --symbols BTC/USDT,ETH/USDT --tf 15m
+tradeagent watch --universe                  # en hacimli 100 parite
+tradeagent watch --universe --top 0          # hepsi (~400 parite, tarama uzar)
 
 # Gerçek/demo hesabın özsermayesine göre boyutlandırılmış bildirim (onay komutu --live ile gelir)
 tradeagent watch --symbols BTC/USDT:USDT --live
 
 # DEMO hesapta tam otomatik: uygun bilet onaysız gönderilir, sonuç bildirilir
+tradeagent watch --universe --live --demo-auto                              # Binance Demo Trading, tüm coinler
 tradeagent watch --symbols BTC/USDT:USDT,ETH/USDT:USDT --live --demo-auto   # Binance Demo Trading
 tradeagent watch --symbols BTC/USDT,ETH/USDT --demo-auto                    # yerel paper
 
@@ -149,15 +163,7 @@ tradeagent watch --symbols BTC/USDT --once
 
 ### Telegram bildirimi (telefona)
 
-1. Telegram'da **@BotFather**'a `/newbot` yazın, bir ad verin; size bir **token** verir.
-2. Yeni botunuza bir mesaj gönderin (ör. "merhaba").
-3. Tarayıcıda `https://api.telegram.org/bot<TOKEN>/getUpdates` adresini açın; `"chat":{"id":...}` içindeki sayı **chat id**'nizdir.
-4. `.env` dosyasına yazın:
-
-```dotenv
-TELEGRAM_BOT_TOKEN=123456:ABC...
-TELEGRAM_CHAT_ID=123456789
-```
+Adım adım rehber: [docs/TELEGRAM.md](docs/TELEGRAM.md). Kısaca: @BotFather'da `/newbot` ile token alın ve `.env` dosyasına `TELEGRAM_BOT_TOKEN` olarak yazın. Bota bir mesaj gönderip `tradeagent telegram-chatid` komutuyla chat id'nizi bulun ve `TELEGRAM_CHAT_ID` olarak yazın. Son olarak `tradeagent notify-test` ile deneme mesajı gönderin.
 
 Bot yalnızca **mesaj gönderir**; Telegram'dan gelen hiçbir mesaj emir onaylayamaz. Token'ı kimseyle paylaşmayın. Windows masaüstü bildirimi kendiliğinden açıktır; kapatmak için `--no-desktop`.
 
@@ -167,14 +173,33 @@ Bot yalnızca **mesaj gönderir**; Telegram'dan gelen hiçbir mesaj emir onaylay
 # Bildirim modu
 powershell -ExecutionPolicy Bypass -File .\scripts\install-watch-task.ps1 -Symbols "BTC/USDT,ETH/USDT"
 
-# Demo hesapta tam otomatik
-powershell -ExecutionPolicy Bypass -File .\scripts\install-watch-task.ps1 -Symbols "BTC/USDT:USDT" -Live -DemoAuto
+# Demo hesapta tam otomatik, tüm coinler (en hacimli 100)
+powershell -ExecutionPolicy Bypass -File .\scripts\install-watch-task.ps1 -Universe -Live -DemoAuto
 
 # Kaldır
 powershell -ExecutionPolicy Bypass -File .\scripts\install-watch-task.ps1 -Remove
 ```
 
 Görev oturum açıldığında başlar, çökerse 1 dakika sonra yeniden başlar ve çıktıyı `data/watch.log` dosyasına yazar. Bilgisayar **uykuya geçerse izleme durur**: Ayarlar → Sistem → Güç bölümünden prize takılıyken uykuyu "Hiçbir zaman" yapın. 7/24 kesintisiz çalışma için sabit IP'li bir VPS daha güvenilirdir (Binance API anahtarına o IP'yi beyaz liste olarak ekleyin).
+
+### Canlı panel (`panel`)
+
+```powershell
+tradeagent panel            # tarayıcıda http://127.0.0.1:8765 açılır
+```
+
+Tek ekranda: izlemenin çalışıp çalışmadığı (son ve sonraki tarama, son hata), mod ve hesap, performans (toplam R, beklenti, kazanma oranı, profit factor, en büyük düşüş, özsermaye), kümülatif R eğrisi, **risk tavanı** (açık risk ve bugünkü kayıp, sınırlarına göre), açık pozisyonlar ve bekleyen emirler, bildirim akışı ve son biletler. 10 saniyede bir yenilenir.
+
+Panel **salt okunurdur**: yalnızca bu bilgisayardan (127.0.0.1) açılır, journal'ı salt okunur modda okur, borsaya bağlanmaz ve hiçbir emir veremez. Dış kaynak (yazı tipi, betik) yüklemez.
+
+### Kurulum kontrolü ve yardımcı komutlar
+
+```powershell
+tradeagent check            # ayarlar, anahtarlar (değerleri gösterilmez), Telegram, yapılacaklar listesi
+tradeagent check --live     # ayrıca demo/canlı hesaba bağlanıp bakiyeyi okur
+tradeagent notify-test      # tüm kanallara örnek bildirim
+tradeagent telegram-chatid  # botunuza yazan sohbetlerin chat id'leri
+```
 
 ### Tarayıcı kuralı (long; short bunun aynasıdır)
 
