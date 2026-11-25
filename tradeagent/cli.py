@@ -1356,7 +1356,7 @@ def main(argv: list[str] | None = None) -> int:
             reconfigure(errors="replace")
         else:
             # Pipes and mintty/Git Bash expect UTF-8, not the Windows ANSI code page.
-            reconfigure(encoding="utf-8", errors="replace")
+            reconfigure(encoding="utf-8", errors="replace", line_buffering=True)  # logs stay current
     args = build_parser().parse_args(argv)
     config_path = args.config
     if config_path is None and (Path.cwd() / "config.yaml").is_file():

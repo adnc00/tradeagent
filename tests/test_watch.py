@@ -197,3 +197,25 @@ def test_live_watch_keeps_bist_on_paper(tmp_path, monkeypatch, inbox):
     assert cli.main(["--config", str(path), "watch", "--symbols", "THYAO.IS", "--once", "--live"]) == 0
     (alert,) = [a for a in inbox.alerts if "THYAO.IS" in a.title]
     assert "--live" not in alert.body
+
+
+def test_redirected_output_is_line_buffered(monkeypatch, tmp_path):
+    calls = []
+
+    class Stream:
+        def isatty(self):
+            return False
+
+        def reconfigure(self, **kwargs):
+            calls.append(kwargs)
+
+        def write(self, text):
+            return len(text)
+
+        def flush(self):
+            pass
+
+    monkeypatch.setattr(cli.sys, "stdout", Stream())
+    monkeypatch.setattr(cli.sys, "stderr", Stream())
+    cli.main(["--config", str(write_config(tmp_path)), "stats"])
+    assert calls and all(c.get("line_buffering") is True for c in calls)
