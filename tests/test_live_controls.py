@@ -274,3 +274,46 @@ def test_risk_card_shows_the_group_cap(tmp_path):
     assert cfg.risk.group_cap_pct == 15.0
     state = panel.build_state(cfg)
     assert state["risk"]["group_cap_pct"] == cfg.risk.group_cap_pct
+
+
+# --- zero noise: no alerts for symbols that cannot be traded right now ------------------------------------
+
+
+def test_a_symbol_already_in_use_is_a_preparation_reason_not_a_send_failure():
+    fake = FakeExchange()
+    broker = broker_with(fake)
+    broker.place_bracket(make_ticket())
+    problems = broker.venue_problems(make_ticket(id="t-second"))
+    assert any("zaten" in p for p in problems)
+
+
+def test_a_market_missing_on_this_account_is_reported_not_raised():
+    fake = FakeExchange()
+    broker = broker_with(fake)
+    assert broker.has_market(SYMBOL) is True
+    assert broker.has_market("SLX/USDT:USDT") is False
+
+
+class MissingMarketBroker(SlowReconcileBroker):
+    def market_type(self, symbol, configured):
+        raise cli.BrokerError(f"binanceusdm borsasında {symbol} piyasası yok (ör. BTC/USDT:USDT).")
+
+
+def test_prepare_turns_a_missing_market_into_a_reason(config_path):
+    ticket_id = scanned_ticket_id(config_path)
+    cfg = load_config(config_path)
+    journal = Journal(cfg.journal_path)
+    try:
+        _, _, reasons = cli.prepare_ticket(journal.get_ticket(ticket_id), MissingMarketBroker(), journal, cfg, quick=True)
+    finally:
+        journal.close()
+    assert any("piyasası yok" in r for r in reasons)
+
+
+def test_scan_list_keeps_only_symbols_the_account_can_trade():
+    class Account:
+        def has_market(self, symbol):
+            return symbol != "SLX/USDT:USDT"
+
+    assert cli.tradable(["BTC/USDT:USDT", "SLX/USDT:USDT"], Account()) == ["BTC/USDT:USDT"]
+    assert cli.tradable(["BTC/USDT"], object()) == ["BTC/USDT"]  # brokers without market lists keep everything

@@ -57,7 +57,7 @@ a { color: inherit; }
 .nav small { color: var(--faint); font-size: var(--fs-small); padding: 0 8px 6px; }
 .nav a { display: block; white-space: nowrap; text-decoration: none; color: #bbbbbb; line-height: 34px; padding: 0 8px; border-radius: 8px; transition: color .15s ease, background-color .15s ease; }
 .nav a:hover { color: var(--text); background: var(--surface); }
-.nav a[aria-current="true"] { color: var(--text); }
+.nav a[aria-current="page"] { color: var(--text); }
 .side-foot { margin-top: auto; color: var(--faint); font-size: var(--fs-small); line-height: 1.45; }
 .top { border-bottom: 1px solid var(--border); display: flex; align-items: stretch; min-width: 0; }
 .status { flex: 1; display: flex; align-items: center; gap: 10px; padding: 0 29px; min-width: 0; }
@@ -163,6 +163,14 @@ footer { color: var(--faint); font-size: var(--fs-small); display: flex; justify
 .dlg-cols { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 18px; align-items: start; }
 @media (max-width: 860px) { .dlg-cols { grid-template-columns: 1fr; } }
 
+/* pages */
+.nav a { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.nav a[aria-current="page"] { color: var(--text); background: var(--surface); }
+.count { font-size: 12px; line-height: 18px; min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--raised); color: var(--text); text-align: center; font-variant-numeric: tabular-nums; }
+.count.hot { background: var(--text); color: #000; }
+.page { display: grid; gap: var(--gap); align-content: start; }
+.page[data-page="bildirimler"] .feed { max-height: none; }
+
 /* goal */
 .goal { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 8px 32px; align-items: end; }
 .goal-figure output { display: block; font-size: 32px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; font-variant-numeric: tabular-nums; }
@@ -237,7 +245,7 @@ dialog::backdrop { background: rgba(0,0,0,.62); }
 <body>
 <div class="shell">
   <aside class="side">
-    <a class="brand" href="#ozet" aria-label="tradeagent genel bakış">
+    <a class="brand" href="#/genel" aria-label="tradeagent genel bakış">
       <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
         <rect width="26" height="26" rx="7" fill="#23262b"/>
         <path d="M5 17.5 L10 12.5 L13.5 15.5 L21 8" fill="none" stroke="#c6f24e" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -245,15 +253,13 @@ dialog::backdrop { background: rgba(0,0,0,.62); }
       </svg>
       <b>tradeagent</b>
     </a>
-    <nav class="nav" aria-label="Bölümler">
+    <nav class="nav" aria-label="Sayfalar">
       <small>Panel</small>
-      <a href="#ozet" aria-current="true">Genel bakış</a>
-      <a href="#hedef">Hedef</a>
-      <a href="#onay">Onay bekleyenler</a>
-      <a href="#borsa">Borsadaki pozisyonlar</a>
-      <a href="#pozisyonlar">Ajanın biletleri</a>
-      <a href="#bildirimler">Bildirimler</a>
-      <a href="#biletler">Biletler</a>
+      <a href="#/genel" data-page="genel" aria-current="page">Genel bakış</a>
+      <a href="#/onay" data-page="onay">Onay bekleyenler <span class="count" id="c-onay" hidden></span></a>
+      <a href="#/pozisyonlar" data-page="pozisyonlar">Pozisyonlar <span class="count" id="c-poz" hidden></span></a>
+      <a href="#/bildirimler" data-page="bildirimler">Bildirimler</a>
+      <a href="#/gecmis" data-page="gecmis">Geçmiş</a>
     </nav>
     <div class="side-foot">Emir yalnızca siz <b>ONAY</b> yazınca gider. Tüm risk kontrolleri gönderimden hemen önce yeniden çalışır. Panel yalnızca bu bilgisayardan açılır.</div>
   </aside>
@@ -266,12 +272,12 @@ dialog::backdrop { background: rgba(0,0,0,.62); }
     <div class="account"><span id="account">-</span><button class="btn small" id="new-btn" type="button">Yeni işlem</button><button class="btn danger small" id="kill-btn" type="button">Acil durdur</button></div>
   </header>
 
-  <main id="ozet">
-    <div class="title-row">
-      <h1>Genel bakış</h1>
-      <p id="summary">-</p>
-    </div>
-
+  <main>
+    <div class="page" data-page="genel" hidden>
+      <div class="title-row">
+        <h1>Genel bakış</h1>
+        <p id="summary">-</p>
+      </div>
     <section class="card" id="hedef" aria-labelledby="h-goal" hidden>
       <div class="card-head"><h2 id="h-goal">Hedef</h2><span id="goal-note">-</span></div>
       <div class="goal">
@@ -282,12 +288,6 @@ dialog::backdrop { background: rgba(0,0,0,.62); }
         </div>
       </div>
     </section>
-
-    <section class="card" id="onay" aria-labelledby="h-await">
-      <div class="card-head"><h2 id="h-await">Onay bekleyenler</h2><span id="await-note">-</span></div>
-      <div class="table-wrap" id="await-wrap"></div>
-    </section>
-
     <section class="card kpis" aria-label="Performans">
       <div class="kpi"><label>Toplam sonuç</label><output class="num" id="k-total">-</output><small>kapanmış işlemler, R</small></div>
       <div class="kpi"><label>Beklenti</label><output class="num" id="k-exp">-</output><small id="k-exp-note">işlem başına, R</small></div>
@@ -296,7 +296,6 @@ dialog::backdrop { background: rgba(0,0,0,.62); }
       <div class="kpi"><label>En büyük düşüş</label><output class="num" id="k-dd">-</output><small>R eğrisinde, zirveden</small></div>
       <div class="kpi"><label>Özsermaye</label><output class="num" id="k-eq">-</output><small id="k-eq-note">son ölçüm</small></div>
     </section>
-
     <div class="row">
       <section class="card" aria-labelledby="h-curve">
         <div class="card-head"><h2 id="h-curve">R eğrisi</h2><span id="curve-note">kümülatif, kapanış sırasına göre</span></div>
@@ -321,25 +320,50 @@ dialog::backdrop { background: rgba(0,0,0,.62); }
       </section>
     </div>
 
+    </div>
+    <div class="page" data-page="onay" hidden>
+      <div class="title-row">
+        <h1>Onay bekleyenler</h1>
+        <p>Ajanın bulduğu ve henüz gönderilmemiş biletler. İnceleyin, düzenleyin, ONAY yazarak gönderin ya da reddedin.</p>
+      </div>
+    <section class="card" id="onay" aria-labelledby="h-await">
+      <div class="card-head"><h2 id="h-await">Onay bekleyenler</h2><span id="await-note">-</span></div>
+      <div class="table-wrap" id="await-wrap"></div>
+    </section>
+    </div>
+    <div class="page" data-page="pozisyonlar" hidden>
+      <div class="title-row">
+        <h1>Pozisyonlar</h1>
+        <p>Borsadaki tüm açık pozisyonlar ve ajanın bekleyen giriş emirleri.</p>
+      </div>
     <section class="card" id="borsa" aria-labelledby="h-venue">
       <div class="card-head"><h2 id="h-venue">Borsadaki pozisyonlar</h2><span id="venue-note">yükleniyor…</span></div>
       <div class="table-wrap" id="venue-wrap"></div>
     </section>
-
     <section class="card" id="pozisyonlar" aria-labelledby="h-pos">
       <div class="card-head"><h2 id="h-pos">Ajanın biletleri: bekleyen ve açık</h2><span id="pos-count">-</span></div>
       <div class="table-wrap" id="pos-wrap"></div>
     </section>
-
-    <div class="row">
-      <section class="card" id="bildirimler" aria-labelledby="h-feed">
+    </div>
+    <div class="page" data-page="bildirimler" hidden>
+      <div class="title-row">
+        <h1>Bildirimler</h1>
+        <p>Telegram'a da giden tüm mesajlar, yeniden eskiye.</p>
+      </div>
+    <section class="card" id="bildirimler" aria-labelledby="h-feed">
         <div class="card-head"><h2 id="h-feed">Bildirimler</h2><span>son 60, yeniden eskiye</span></div>
         <ul class="feed" id="feed"></ul>
-      </section>
-      <section class="card" id="biletler" aria-labelledby="h-tix">
+    </section>
+    </div>
+    <div class="page" data-page="gecmis" hidden>
+      <div class="title-row">
+        <h1>Geçmiş</h1>
+        <p>Son 40 bilet: gönderilen, kapanan, iptal edilen ve süresi dolanlar.</p>
+      </div>
+    <section class="card" id="biletler" aria-labelledby="h-tix">
         <div class="card-head"><h2 id="h-tix">Son biletler</h2><span>son 40</span></div>
         <div class="table-wrap" id="tix-wrap"></div>
-      </section>
+    </section>
     </div>
 
     <dialog id="dlg" aria-labelledby="dlg-title">
@@ -557,6 +581,7 @@ function renderVenue(list, error) {
   wrap.textContent = "";
   if (error) { $("venue-note").textContent = "okunamadı"; wrap.append(el("p", { class: "empty", text: error })); return; }
   venueRows = list;
+  setCount("c-poz", list.length, list.some(p => p.stop == null));
   const total = list.reduce((a, p) => a + (p.unrealized_pnl || 0), 0);
   $("venue-note").textContent = list.length ? `${list.length} pozisyon · anlık K/Z ${total >= 0 ? "+" : "−"}${n2.format(Math.abs(total))} USDT` : "açık pozisyon yok";
   wrap.append(table([
@@ -1071,6 +1096,7 @@ async function refresh() {
     lastState = s;
     renderStatus(s); renderGoal(s); renderKpis(s); renderRisk(s);
     if (changed("await", [s.awaiting, s.account, (s.watch || {}).mode])) renderAwaiting(s);
+    setCount("c-onay", (s.awaiting || []).length, true);
     if (changed("curve", s.r_curve)) renderCurve(s);
     if (changed("pos", s.open_tickets)) renderPositions(s);
     if (changed("feed", s.alerts)) renderFeed(s);
@@ -1081,8 +1107,26 @@ async function refresh() {
   }
 }
 window.addEventListener("resize", () => { if (lastState) renderCurve(lastState); });
-const navLinks = [...document.querySelectorAll(".nav a")];
-for (const a of navLinks) a.addEventListener("click", () => navLinks.forEach(b => b.setAttribute("aria-current", String(b === a))));
+const PAGES = ["genel", "onay", "pozisyonlar", "bildirimler", "gecmis"];
+function route() {
+  const wanted = (location.hash.match(/^#\/(\w+)/) || [])[1];
+  const name = PAGES.includes(wanted) ? wanted : "genel";
+  for (const node of document.querySelectorAll(".page")) node.hidden = node.dataset.page !== name;
+  for (const a of document.querySelectorAll(".nav a[data-page]")) {
+    if (a.dataset.page === name) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+  }
+  window.scrollTo(0, 0);
+  if (name === "genel" && lastState) renderCurve(lastState);
+  if (name === "pozisyonlar") refreshVenue();
+}
+window.addEventListener("hashchange", route);
+route();
+function setCount(id, n, hot) {
+  const node = $(id);
+  node.hidden = !n;
+  node.textContent = String(n || "");
+  node.classList.toggle("hot", !!hot && n > 0);
+}
 refresh().then(refreshVenue);
 setInterval(refresh, 10000);
 setInterval(refreshVenue, 15000);

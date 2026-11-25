@@ -2,6 +2,15 @@
 
 Biçim [Keep a Changelog](https://keepachangelog.com/tr-TR/1.1.0/), sürümler [SemVer](https://semver.org/lang/tr/).
 
+## [0.10.0] - 2026-11-26
+
+### Değişti
+- Panel sayfalara bölündü: Genel bakış, Onay bekleyenler, Pozisyonlar, Bildirimler, Geçmiş. Menü sayfayı değiştirir (kaydırmaz); onay bekleyen bilet ve açık pozisyon sayıları menüde rozet olarak görünür (stop'u olmayan pozisyon varsa rozet vurgulanır).
+
+### Düzeltildi
+- Aynı coinde ikinci bilet (ör. 5m ve 15m aynı anda) artık "otomatik emir sorunu" uyarısı üretmez: açık pozisyon/emir kontrolü bilet hazırlanırken yapılır ve bilet sessizce elenir.
+- Demo hesapta listelenmeyen coinler (genel sıralamada olup demo borsada olmayanlar) taramadan çıkarılır; bir coinin eksikliği artık bütün turu "izleme hatası"na düşürmez.
+
 ## [0.9.0] - 2026-11-26
 
 ### Eklendi

@@ -163,6 +163,14 @@ class CcxtBroker(Broker):
             raise BrokerError(f"{symbol} lineer USDⓈ-M futures piyasası değil; BTC/USDT:USDT biçimini kullanın.")
         return market
 
+    def has_market(self, symbol: str) -> bool:
+        """Whether this account can trade ``symbol`` (the demo venue lists fewer pairs than the live one)."""
+        try:
+            self._market(symbol)
+        except BrokerError:
+            return False
+        return True
+
     def market_type(self, symbol: str, configured: str) -> str:
         self._market(symbol)
         return "futures"
@@ -199,6 +207,10 @@ class CcxtBroker(Broker):
             problems.append(f"Miktar {ticket.qty} borsanın en düşük miktarının ({min_amount}) altında.")
         if min_cost is not None and ticket.qty * ticket.entry < float(min_cost):
             problems.append(f"Pozisyon değeri borsanın en düşük emir tutarının ({min_cost}) altında.")
+        if self._has_exposure(ticket.symbol):
+            problems.append(
+                f"{ticket.symbol} için zaten açık pozisyon veya emir var; aynı sembolde aynı anda tek bilet çalışır."
+            )
         return problems
 
     def _is_hedge_mode(self, symbol: str | None = None) -> bool:

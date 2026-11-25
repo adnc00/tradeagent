@@ -383,12 +383,15 @@ def prepare_ticket(
 ) -> tuple[OrderTicket, AccountState, list[str]]:
     """Venue-rounded, re-sized ticket plus every reason it must not be sent."""
     state = account_state(broker, journal, goal=cfg.goal, quick=quick)
-    prepared = replace(ticket, market=broker.market_type(ticket.symbol, ticket.market))
-    if prepared.stop is not None and prepared.targets:
-        entry, stop, targets = broker.normalize_prices(
-            prepared.symbol, prepared.side, prepared.entry, prepared.stop, prepared.targets
-        )
-        prepared = replace(prepared, entry=entry, stop=stop, targets=targets)
+    try:
+        prepared = replace(ticket, market=broker.market_type(ticket.symbol, ticket.market))
+        if prepared.stop is not None and prepared.targets:
+            entry, stop, targets = broker.normalize_prices(
+                prepared.symbol, prepared.side, prepared.entry, prepared.stop, prepared.targets
+            )
+            prepared = replace(prepared, entry=entry, stop=stop, targets=targets)
+    except BrokerError as exc:  # e.g. the pair is not listed on this (demo) account: a reason, not a crash
+        return ticket, state, [str(exc)]
     prepared = resize_for_account(prepared, state.equity, broker, cfg.risk)
     reasons = [v.message for v in check_ticket(prepared, state, cfg.risk)]
     if not reasons:
@@ -580,6 +583,12 @@ def parse_timeframes(text: str) -> list[str]:
 def default_interval(frames: list[str]) -> int:
     """Wake-up interval in minutes: the shortest timeframe."""
     return int(min(_TIMEFRAMES[t] for t in frames).total_seconds() // 60)
+
+
+def tradable(symbols: list[str], broker) -> list[str]:
+    """Symbols the account can trade (brokers without a market list keep them all)."""
+    check = getattr(broker, "has_market", None)
+    return [s for s in symbols if check is None or check(s)]
 
 
 def parse_symbols(text: str) -> list[str]:
@@ -1091,7 +1100,6 @@ def watch_cycle(args: argparse.Namespace, cfg: Config, journal: Journal, channel
     stamp = datetime.now(UTC).astimezone(ISTANBUL)
     print(f"--- tarama {stamp:%d.%m.%Y %H:%M} (Türkiye saati) ---")
     symbols = resolve_symbols(args, cfg)
-    fresh = run_scan(symbols, args.tf, args.htf, args.limit, cfg, journal, quiet=args.universe)
     brokers: dict[str, Broker] = {}
 
     def live_for(symbol: str) -> bool:
@@ -1103,9 +1111,13 @@ def watch_cycle(args: argparse.Namespace, cfg: Config, journal: Journal, channel
             brokers[key] = make_broker(cfg, symbol, live_for(symbol))
         return brokers[key]
 
-    for symbol in symbols:
-        if live_for(symbol):
-            broker_for(symbol)
+    # Only pairs this account lists: the demo venue lacks some pairs that the public ranking includes.
+    listed = [s for s in symbols if not live_for(s) or tradable([s], broker_for(s))]
+    if len(listed) < len(symbols):
+        skipped = [s for s in symbols if s not in listed]
+        print(f"  Bu hesapta işlem görmeyen {len(skipped)} parite atlandı: {', '.join(skipped[:8])}{' …' if len(skipped) > 8 else ''}")
+    symbols = listed
+    fresh = run_scan(symbols, args.tf, args.htf, args.limit, cfg, journal, quiet=args.universe)
     for broker in [b for key, b in brokers.items() if key != "paper"]:
         refresh(broker, journal)
         mark_filled(broker, journal)
