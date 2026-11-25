@@ -25,11 +25,13 @@ def top_symbols(
     top: int = 100,
     min_quote_volume: float = 0.0,
     exclude: Iterable[str] = (),
+    coins_only: bool = True,
 ) -> list[str]:
     """Active pairs quoted (and, for perpetuals, settled) in ``quote``, highest 24h volume first.
 
     ``derivatives`` selects linear perpetual swaps (``BTC/USDT:USDT``); otherwise
-    spot pairs. ``top`` 0 means no cap.
+    spot pairs. ``top`` 0 means no cap. ``coins_only`` drops Binance's stock,
+    commodity and index perpetuals.
     """
     quote = quote.upper()
     exclude = tuple(exclude)
@@ -42,6 +44,13 @@ def top_symbols(
             continue
         if derivatives:
             if not (market.get("swap") and market.get("linear") and str(market.get("settle", "")).upper() == quote):
+                continue
+            info = market.get("info") or {}
+            # Binance lists stock, commodity and index perpetuals too (TRADIFI_PERPETUAL / EQUITY /
+            # COMMODITY / INDEX); they need a separate agreement (-4411) and are not coins.
+            if coins_only and (
+                info.get("contractType", "PERPETUAL") != "PERPETUAL" or info.get("underlyingType", "COIN") != "COIN"
+            ):
                 continue
         elif not market.get("spot"):
             continue

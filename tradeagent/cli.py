@@ -471,6 +471,7 @@ def resolve_symbols(args: argparse.Namespace, cfg: Config) -> list[str]:
         top=top,
         min_quote_volume=settings.min_quote_volume,
         exclude=settings.exclude,
+        coins_only=settings.coins_only,
     )
     allowed = [s for s in ranked if symbol_allowed(s, cfg.risk.allowlist)]
     print(
@@ -924,6 +925,14 @@ def expire_entries(broker: Broker, journal: Journal, cfg: Config, data, now: dat
     return expired
 
 
+def mark_filled(broker: Broker, journal: Journal) -> None:
+    """A sent ticket whose symbol now holds a position has filled: mark it 'open' (announced as a fill)."""
+    held = {p.symbol for p in broker.get_positions()}
+    for ticket in journal.open_tickets(broker.name):
+        if ticket.status == "submitted" and ticket.symbol in held:
+            journal.set_ticket_status(ticket.id, "open", note="giriş doldu (borsada pozisyon var)")
+
+
 def _last_note(text: str | None) -> str:
     lines = [line for line in (text or "").splitlines() if line.strip()]
     if not lines:
@@ -995,6 +1004,7 @@ def watch_cycle(args: argparse.Namespace, cfg: Config, journal: Journal, channel
             broker_for(symbol)
     for broker in [b for key, b in brokers.items() if key != "paper"]:
         refresh(broker, journal)
+        mark_filled(broker, journal)
     brokers.setdefault("paper", paper_broker(cfg))
     market = MarketData(cfg.crypto.exchange)
     now = datetime.now(UTC)
@@ -1023,7 +1033,12 @@ def watch_cycle(args: argparse.Namespace, cfg: Config, journal: Journal, channel
                 for line in outcome.lines:
                     print(line)
                 continue  # retried next wake-up while the ticket is still fresh
-            if not journal.claim_notification(current.id, "new"):
+            for line in outcome.lines:
+                print(line)
+            if outcome.orders:
+                print_orders(outcome.orders)
+            # A sent order is always announced, even if an earlier attempt's problem already was.
+            if not journal.claim_notification(current.id, "sent" if outcome.status == "sent" else f"auto-{outcome.status}"):
                 continue
             if outcome.status == "sent" and outcome.ticket is not None:
                 alert = notify.ticket_alert(
@@ -1042,8 +1057,6 @@ def watch_cycle(args: argparse.Namespace, cfg: Config, journal: Journal, channel
                     f"DİKKAT {current.symbol} - otomatik emir sorunu ({outcome.status})",
                     "\n".join([*outcome.lines, *_order_lines(outcome.orders), f"Bilet: {current.id}"]),
                 )
-            for line in outcome.lines:
-                print(line)
             _send(channels, alert)
             continue
         prepared, state, reasons = prepare_ticket(current, broker, journal, cfg)

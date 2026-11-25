@@ -219,3 +219,38 @@ def test_redirected_output_is_line_buffered(monkeypatch, tmp_path):
     monkeypatch.setattr(cli.sys, "stderr", Stream())
     cli.main(["--config", str(write_config(tmp_path)), "stats"])
     assert calls and all(c.get("line_buffering") is True for c in calls)
+
+
+def test_auto_send_is_announced_even_after_an_earlier_problem_alert(config_path, inbox):
+    assert watch_once(config_path) == 0  # notify mode announces the ticket first
+    assert watch_once(config_path, "--demo-auto") == 0
+    assert any("otomatik gönderildi" in a.title for a in inbox.alerts)
+
+
+class FilledLiveBroker:
+    name, environment, is_demo = "ccxt:binanceusdm", "demo trading", True
+
+    def __init__(self, symbol):
+        from tradeagent.brokers.base import Position
+        from tradeagent.models import Side
+        self.positions = [Position(symbol=symbol, side=Side.LONG, qty=1.0, entry_price=None)]
+
+    def get_positions(self):
+        return self.positions
+
+
+def test_live_fill_marks_ticket_open_and_is_announced(config_path, inbox):
+    assert watch_once(config_path) == 0
+    (row,) = tickets(config_path)
+    journal = Journal(load_config(config_path).journal_path)
+    try:
+        assert journal.claim_for_submission(row["id"], broker="ccxt:binanceusdm", mode="live")
+        with journal._conn:
+            journal._conn.execute("UPDATE tickets SET status='submitted', submitted_at=? WHERE id=?",
+                                  (datetime.now(UTC).isoformat(), row["id"]))
+        cli.mark_filled(FilledLiveBroker(row["symbol"]), journal)
+        assert journal.get_ticket(row["id"]).status == "open"
+        cli.announce_updates(journal, [inbox])
+    finally:
+        journal.close()
+    assert any("giriş doldu" in a.title for a in inbox.alerts)

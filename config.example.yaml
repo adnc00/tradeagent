@@ -72,3 +72,4 @@ universe:
   top: 100                     # en yüksek hacimli kaç parite (0 = hepsi, ~400; tarama uzar)
   min_quote_volume: 10000000   # en az 24s işlem hacmi (USDT); sığ piyasalar elenir
   exclude: []                  # hariç tutulacak semboller veya coinler, ör. [PEPE, 1000SHIB/USDT:USDT]
+  coins_only: true             # Binance'ın hisse/emtia/endeks vadelilerini (TradFi) dışarıda bırak

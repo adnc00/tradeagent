@@ -222,3 +222,22 @@ def test_check_flags_the_bot_id_used_as_chat_id(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "botun kendi" in out
     assert "TOPSECRET" not in out
+
+
+def test_universe_skips_tradfi_and_index_perpetuals():
+    exchange = FakeExchange()
+    exchange.markets["MU/USDT:USDT"] = dict(
+        symbol="MU/USDT:USDT", base="MU", quote="USDT", settle="USDT", swap=True, linear=True, active=True, spot=False,
+        info={"contractType": "TRADIFI_PERPETUAL", "underlyingType": "EQUITY"},
+    )
+    exchange.markets["BTCDOM/USDT:USDT"] = dict(
+        symbol="BTCDOM/USDT:USDT", base="BTCDOM", quote="USDT", settle="USDT", swap=True, linear=True, active=True,
+        spot=False, info={"contractType": "PERPETUAL", "underlyingType": "INDEX"},
+    )
+    exchange.markets["BTC/USDT:USDT"]["info"] = {"contractType": "PERPETUAL", "underlyingType": "COIN"}
+    exchange.volumes.update({"MU/USDT:USDT": 9e10, "BTCDOM/USDT:USDT": 9e10})
+    symbols = universe.top_symbols(exchange, derivatives=True, quote="USDT", top=0, min_quote_volume=0)
+    assert "MU/USDT:USDT" not in symbols and "BTCDOM/USDT:USDT" not in symbols
+    assert symbols[0] == "BTC/USDT:USDT"
+    with_all = universe.top_symbols(exchange, derivatives=True, quote="USDT", top=0, min_quote_volume=0, coins_only=False)
+    assert "MU/USDT:USDT" in with_all

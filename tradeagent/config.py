@@ -78,6 +78,7 @@ class UniverseConfig:
     top: int = 100
     min_quote_volume: float = 10_000_000.0
     exclude: tuple[str, ...] = ()
+    coins_only: bool = True
 
     def __post_init__(self) -> None:
         if not 0 <= self.top <= 1000:
