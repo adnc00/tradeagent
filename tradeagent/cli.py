@@ -194,8 +194,14 @@ def journal_paper_state(broker: PaperBroker, journal: Journal) -> None:
 
 
 def reconcile_live_tickets(broker: Broker, journal: Journal) -> None:
-    """Close tickets the venue no longer holds; mark unverifiable ones 'unknown'."""
+    """Close tickets the venue no longer holds; mark unverifiable ones 'unknown'.
+
+    A 'submitting' ticket belongs to the process that is sending it right now: its legs
+    may be half placed, so it is never reconciled (or its stop cancelled) from here.
+    """
     for ticket in journal.open_tickets(broker.name):
+        if ticket.status == "submitting":
+            continue
         try:
             outcome = broker.reconcile_ticket(ticket)
         except OrderStateUnknown as exc:

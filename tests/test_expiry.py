@@ -185,3 +185,57 @@ def test_ccxt_entry_filling_during_cancel_keeps_protection():
     assert broker.cancel_entry(t) == "filled"
     assert fake.orders[ids["stop"]]["status"] == "open"
     fake.cancel_order = original
+
+
+# --- a ticket being submitted belongs to the submitting process ------------------------------------
+
+
+class RejectingLiveBroker:
+    """A live-like broker: no position, no orders, and it refuses the bracket."""
+
+    name, environment, is_demo = "ccxt:binanceusdm", "demo trading", True
+
+    def __init__(self):
+        self.reconciled = []
+
+    def reconcile_ticket(self, ticket):
+        self.reconciled.append(ticket.id)
+        return "closed"
+
+    def get_balance(self):
+        from tradeagent.brokers.base import Balance
+        return Balance(equity=10_000.0, free=10_000.0, currency="USDT")
+
+    def get_price(self, symbol):
+        return 100.65 * 1.001
+
+    def place_bracket(self, ticket):
+        raise cli.BrokerError("stop reddedildi: -4509")
+
+
+def test_reconcile_never_touches_a_ticket_being_submitted(config_path, monkeypatch):
+    ticket_id = scanned_ticket_id(config_path)
+    cfg = load_config(config_path)
+    broker = RejectingLiveBroker()
+    journal = Journal(cfg.journal_path)
+    try:
+        assert journal.claim_for_submission(ticket_id, broker=broker.name, mode="live")
+        cli.reconcile_live_tickets(broker, journal)
+        assert broker.reconciled == []
+        assert journal.get_ticket(ticket_id).status == "submitting"
+    finally:
+        journal.close()
+
+
+def test_a_rejected_bracket_returns_the_ticket_to_new(config_path, monkeypatch):
+    ticket_id = scanned_ticket_id(config_path)
+    cfg = load_config(config_path)
+    broker = RejectingLiveBroker()
+    journal = Journal(cfg.journal_path)
+    try:
+        prepared = journal.get_ticket(ticket_id)
+        outcome = cli.send_confirmed(prepared, broker, journal, cfg, "live")
+        assert outcome.status == "failed"
+        assert journal.get_ticket(ticket_id).status == "new"
+    finally:
+        journal.close()
