@@ -23,6 +23,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
+from tradeagent import __version__
 from tradeagent.config import Config
 from tradeagent.ict import NEW_YORK
 from tradeagent.journal import OPEN_STATUSES, compute_stats
@@ -36,6 +37,7 @@ MAX_RECENT_TICKETS = 40
 MAX_EQUITY_POINTS = 500
 MAX_BODY_BYTES = 16_384
 TOKEN_PLACEHOLDER = b"{{PANEL_TOKEN}}"
+VERSION_PLACEHOLDER = b"{{PANEL_VERSION}}"
 TICKET_COLUMNS = (
     "id, symbol, side, market, timeframe, status, entry, stop, targets, qty, leverage, fee_rate, risk_amount, rr, "
     "broker, mode, created_at, submitted_at, closed_at, result_r, pnl"
@@ -184,6 +186,7 @@ def build_state(cfg: Config, now: datetime | None = None, *, live: bool = False)
         "daily_loss_limit_pct": cfg.risk.daily_loss_pct,
     }
     return {
+        "version": __version__,
         "generated_at": moment.isoformat(),
         "watch": {**watch, "alive": alive},
         "config": {
@@ -283,7 +286,9 @@ def make_server(cfg: Config, port: int = DEFAULT_PORT, *, live: bool = False) ->
                 return
             path = self.path.split("?", 1)[0]
             if path == "/":
-                self._send(200, _page().replace(TOKEN_PLACEHOLDER, token.encode("ascii")), "text/html; charset=utf-8")
+                page = _page().replace(TOKEN_PLACEHOLDER, token.encode("ascii"))
+                page = page.replace(VERSION_PLACEHOLDER, __version__.encode("ascii"))
+                self._send(200, page, "text/html; charset=utf-8")
             elif path == "/api/state":
                 self._json(200, build_state(cfg, live=live))
             else:

@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="panel-token" content="{{PANEL_TOKEN}}">
+<meta name="panel-version" content="{{PANEL_VERSION}}">
 <title>tradeagent · canlı panel</title>
 <style>
 :root {
@@ -320,6 +321,7 @@ const STATUS = {
 };
 const $ = (id) => document.getElementById(id);
 const TOKEN = (document.querySelector('meta[name="panel-token"]') || {}).content || "";
+const PAGE_VERSION = (document.querySelector('meta[name="panel-version"]') || {}).content || "";
 async function act(path, body) {
   const res = await fetch(path, {
     method: "POST", cache: "no-store",
@@ -690,11 +692,26 @@ function changed(key, value) {
   return true;
 }
 let lastState = null;
+function problem(text) {
+  $("dot").className = "dot bad";
+  $("status-line").textContent = text;
+}
 async function refresh() {
+  let s;
   try {
     const res = await fetch("/api/state", { cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
-    const s = await res.json();
+    s = await res.json();
+  } catch (err) {
+    problem("Panel sunucusuna ulaşılamıyor. Terminalde 'tradeagent panel --live' çalışıyor mu?");
+    return;
+  }
+  if (!s.version || s.version !== PAGE_VERSION || !s.account) {
+    problem(`Panel sunucusu eski sürüm (${s.version || "bilinmiyor"}; sayfa ${PAGE_VERSION || "?"}). `
+      + "Paneli çalıştıran terminali kapatıp 'tradeagent panel --live' ile yeniden başlatın, sonra sayfayı yenileyin.");
+    return;
+  }
+  try {
     lastState = s;
     renderStatus(s); renderKpis(s); renderRisk(s);
     if (changed("await", [s.awaiting, s.account, (s.watch || {}).mode])) renderAwaiting(s);
@@ -704,8 +721,7 @@ async function refresh() {
     if (changed("tix", s.recent_tickets)) renderTickets(s);
     $("updated").textContent = "Panel güncellendi: " + when(s.generated_at) + " (10 sn'de bir yenilenir)";
   } catch (err) {
-    $("dot").className = "dot bad";
-    $("status-line").textContent = "Panel sunucusuna ulaşılamıyor. Terminalde 'tradeagent panel' çalışıyor mu?";
+    problem("Panel verisi çizilemedi: " + err + ". Sayfayı yenileyin; sürerse paneli yeniden başlatın.");
   }
 }
 window.addEventListener("resize", () => { if (lastState) renderCurve(lastState); });

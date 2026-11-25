@@ -204,3 +204,13 @@ def test_queue_shows_rr_after_fees(config_path):
     (ticket,) = panel.build_state(load_config(config_path))["awaiting"]
     assert ticket["id"] == ticket_id
     assert ticket["rr_net"] == pytest.approx(2.24, abs=0.01)  # the synthetic setup's R:R after 0.1% fees
+
+
+def test_page_and_state_carry_the_same_version(server, config_path):
+    import tradeagent
+
+    base, _ = server
+    with urllib.request.urlopen(base + "/") as response:
+        page = response.read().decode("utf-8")
+    assert f'name="panel-version" content="{tradeagent.__version__}"' in page
+    assert panel.build_state(load_config(config_path))["version"] == tradeagent.__version__
