@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tradeagent"
+version = "0.2.0"
+description = "Onaylı ICT/SMC trade ajanı: tarama, risk motoru ve yalnızca kullanıcı onayıyla emir."
+readme = "README.md"
+requires-python = ">=3.14"
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = [
+    "ccxt>=4.5",
+    "alpaca-py>=0.40",
+    "yfinance>=1.0",
+    "pandas>=2.2",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+tradeagent = "tradeagent.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["tradeagent*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"
+markers = [
+    "network: needs internet access (public, read-only market-data endpoints only)",
+]

@@ -1,0 +1,62 @@
+# tradeagent ayar dosyası örneği.
+# Kopyalayın:  config.yaml (bu klasörde; veya --config ile yol verin)
+# Bilinmeyen bir anahtar yazarsanız program hata verir; yazım hatası sessizce kuralı kapatamaz.
+# API anahtarları BURAYA YAZILMAZ: ortam değişkenleri veya .env dosyası (bkz. .env.example).
+
+# paper: yerel simülasyon (varsayılan).
+# live : gerçek/uzak broker. Ayrıca komut satırında --live gerekir; ikisi birden yoksa paper kullanılır.
+mode: paper
+
+# journal.sqlite ve paper_state.json burada tutulur. Göreli yol bu dosyanın klasörüne göre çözülür.
+data_dir: data
+
+# İşlem başına komisyon oranı (0.001 = %0.1, en fazla 0.01). Pozisyon büyüklüğüne ve R:R'ye gidiş-dönüş eklenir.
+fee_rate: 0.001
+
+risk:
+  risk_pct: 0.5            # işlem başına hedef risk, özsermayenin %'si
+  max_risk_pct: 1.0        # tek işlemde izin verilen en yüksek risk %
+  daily_loss_pct: 2.0      # günlük kayıp limiti % (New York gece yarısından itibaren)
+  weekly_loss_pct: 5.0     # haftalık kayıp limiti % (Pazartesi New York gece yarısından itibaren)
+  max_open_risk_pct: 3.0   # açık pozisyon + bekleyen emirlerin toplam riski %
+  max_leverage: 5          # futures için en yüksek kaldıraç
+  min_rr: 2.0              # hedef 1'e göre en düşük ödül/risk (komisyon dahil)
+  mmr: 0.01                # likidasyon tahmini için bakım marjin oranı (borsanın kademesine göre ayarlayın)
+  liq_stop_multiple: 2.0   # likidasyon mesafesi en az stop mesafesinin bu katı olmalı
+  # Yalnızca bu semboller için bilet üretilir. Futures için ccxt biçimi: BTC/USDT:USDT
+  allowlist:
+    - BTC/USDT
+    - ETH/USDT
+    - THYAO.IS
+    - AAPL
+
+scanner:
+  swing_length: 1          # fraktal: pivotun iki yanındaki mum sayısı (1 = 3 mumlu swing)
+  eqh_tolerance_pct: 0.1   # eşit tepe/dip toleransı, fiyatın %'si
+  displacement_k: 1.5      # MSS mumunun gövdesi >= k x ATR olmalı
+  atr_period: 14
+  sweep_lookback: 30       # süpürme ile MSS arasındaki en fazla mum
+  reclaim_bars: 2          # süpürmeden sonra seviyenin gerisinde kapanış için mum sayısı
+  max_setup_age: 20        # MSS en fazla bu kadar mum önce olmalı
+  entry: ce                # ce = FVG %50 (CE); top = FVG'nin fiyatın ilk değdiği kenarı
+  stop_buffer_pct: 0.05    # stop, süpürme ucunun bu % ötesine konur
+  killzones: []            # boş = filtre yok; örn. [london, ny_am, ny_pm]
+  leverage: 1              # yalnızca futures biletlerine uygulanır
+
+crypto:
+  # Veri ve paper için herhangi bir ccxt kimliği (binance, btcturk, kraken, coinbase...).
+  # CANLI emir yalnızca binanceusdm (USDⓈ-M futures, semboller BTC/USDT:USDT biçiminde) ile mümkündür.
+  exchange: binance
+  testnet: true            # binanceusdm için true = Binance demo trading ortamı
+
+alpaca:
+  paper: true              # true: Alpaca paper hesabı (live modda bile gerçek para kullanılmaz)
+
+execution:
+  ticket_max_deviation_pct: 0.5   # fiyat girişten bu %'den fazla uzaklaştıysa bilet bayat sayılır
+  ticket_max_age_minutes: 60      # bu kadar dakikadan eski bilet gönderilmez (yeniden tarayın)
+
+paper:
+  equity: 10000            # yerel simülasyonun başlangıç özsermayesi
+  sync: true               # true: bekleyen paper emirleri herkese açık mum verisiyle ilerletilir
+  sync_timeframe: 5m

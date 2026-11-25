@@ -1,0 +1,17 @@
+# secrets and local state: never commit
+.env
+data/
+config.yaml
+# python
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+*.log
+.venv/
+venv/
+.env.*
+!.env.example
+.codegraph/
