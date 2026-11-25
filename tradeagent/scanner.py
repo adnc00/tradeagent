@@ -55,7 +55,7 @@ from tradeagent.ict import (
     validate_ohlc,
 )
 from tradeagent.models import AccountState, OrderTicket, RiskLimits, Setup, Side
-from tradeagent.risk import check_ticket, floor_to_step, fmt, lot_step, position_size
+from tradeagent.risk import auto_leverage, check_ticket, floor_to_step, fmt, lot_step, position_size
 
 ENTRY_MODES = ("ce", "top")
 MIN_CANDLES = 3
@@ -419,7 +419,9 @@ def scan_symbol(
             stop=geom.stop,
             targets=list(geom.targets),
             qty=qty,
-            leverage=params.leverage if market == "futures" else 1.0,
+            leverage=(
+                auto_leverage(qty, geom.entry, account.equity, params.leverage, limits) if market == "futures" else 1.0
+            ),
             risk_pct=limits.risk_pct,
             fee_rate=fee_rate,
             market=market,

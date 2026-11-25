@@ -72,6 +72,8 @@ $settings = New-ScheduledTaskSettingsSet `
     -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) `
     -MultipleInstances IgnoreNew
 
+# A running instance keeps its old arguments (MultipleInstances IgnoreNew): stop it first.
+if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) { Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue }
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings `
     -Description "tradeagent 7/24 izleme ($watchArgs)" -Force | Out-Null
 Start-ScheduledTask -TaskName $TaskName

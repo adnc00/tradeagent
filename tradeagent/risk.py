@@ -206,6 +206,16 @@ def _loss_pct(start_equity: float | None, equity: float) -> float:
     return max(0.0, (start - equity) / start * 100.0)
 
 
+def auto_leverage(qty: float, entry: float, equity: float, leverage: float, limits: RiskLimits) -> float:
+    """Leverage for a futures position so its margin stays within ``limits.margin_per_trade_pct``
+    of equity: at least ``leverage``, at most ``limits.max_leverage``, a whole number."""
+    share = limits.margin_per_trade_pct
+    if share <= 0 or qty <= 0 or entry <= 0 or equity <= 0:
+        return leverage
+    needed = math.ceil(qty * entry / (equity * share / 100.0) - 1e-9)
+    return float(math.floor(min(max(leverage, needed), limits.max_leverage)))
+
+
 def symbol_allowed(symbol: str, allowlist: tuple[str, ...] | list[str]) -> bool:
     """Exact (case-insensitive) match or a shell-style pattern, e.g. ``*/USDT:USDT`` = every USDT-M perpetual."""
     upper = symbol.upper()

@@ -101,3 +101,19 @@ def test_scan_runs_every_timeframe_and_fetches_the_bias_once(tmp_path, monkeypat
     assert cli.main(["--config", str(path), "scan", "--symbols", "BTC/USDT", "--tf", "5m,15m"]) == 0
     assert calls.count("1d") == 1
     assert calls.count("5m") == 1 and calls.count("15m") == 1
+
+
+def test_scanner_applies_automatic_leverage_before_its_risk_check():
+    import pandas as pd
+    from tradeagent.scanner import ScannerParams, scan_symbol
+    from tests.synthetic import long_setup_frames
+
+    ltf, daily = long_setup_frames()
+    lim = limits(max_group_risk_pct=15.0, margin_per_trade_pct=33.0, min_rr=1.0)
+    (setup,) = scan_symbol(
+        "SOL/USDT:USDT", ltf, daily, timeframe="15m", account=AccountState(equity=10_000.0), limits=lim,
+        params=ScannerParams(), fee_rate=0.0005, market="futures", now=ltf.index[-1].to_pydatetime(),
+    )
+    assert setup.ticket is not None, setup.reasons
+    notional = setup.ticket.qty * setup.ticket.entry
+    assert setup.ticket.leverage == math.ceil(notional / 3_300.0)

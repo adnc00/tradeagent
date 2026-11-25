@@ -44,6 +44,7 @@ from tradeagent.risk import (
     floor_to_step,
     liquidation_price,
     lot_step,
+    auto_leverage,
     position_size,
     symbol_allowed,
     ticket_metrics,
@@ -322,11 +323,8 @@ def resize_for_account(ticket: OrderTicket, equity: float, broker: Broker, limit
     except ValueError:
         return ticket
     sized = replace(ticket, qty=broker.normalize_qty(ticket.symbol, floor_to_step(qty, lot_step(ticket.symbol))))
-    share = getattr(limits, "margin_per_trade_pct", 0.0) if limits is not None else 0.0
-    if share > 0 and sized.market == "futures" and equity > 0 and sized.qty > 0:
-        needed = math.ceil(sized.qty * sized.entry / (equity * share / 100.0) - 1e-9)
-        leverage = float(min(max(sized.leverage, needed), limits.max_leverage))
-        sized = replace(sized, leverage=float(math.floor(leverage)))
+    if limits is not None and sized.market == "futures":
+        sized = replace(sized, leverage=auto_leverage(sized.qty, sized.entry, equity, sized.leverage, limits))
     return sized
 
 
