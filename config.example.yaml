@@ -24,6 +24,8 @@ risk:
   min_rr: 2.0              # hedef 1'e göre en düşük ödül/risk (komisyon dahil)
   mmr: 0.01                # likidasyon tahmini için bakım marjin oranı (borsanın kademesine göre ayarlayın)
   liq_stop_multiple: 2.0   # likidasyon mesafesi en az stop mesafesinin bu katı olmalı
+  max_group_risk_pct: 0    # aynı yöndeki korelasyonlu grubun toplam açık riski % (0 = max_risk_pct, grup tek pozisyon sayılır)
+  margin_per_trade_pct: 0  # futures: >0 ise kaldıraç otomatik yükselir, bir işlemin teminatı bakiyenin bu %'sini aşmaz
   # Yalnızca bu semboller için bilet üretilir. Futures için ccxt biçimi: BTC/USDT:USDT
   # Desen kullanılabilir: '*/USDT:USDT' = tüm USDT-M sürekli vadeliler (--universe için).
   allowlist:

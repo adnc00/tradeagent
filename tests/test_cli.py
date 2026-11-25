@@ -396,7 +396,7 @@ def test_scan_skips_a_symbol_with_bad_data(config_path, monkeypatch, capsys):
     monkeypatch.setattr(cli, "MarketData", BrokenSymbolMarketData)
     assert cli.main(["--config", str(config_path), "scan", "--symbols", "ETH/USDT,BTC/USDT"]) == 0
     out = capsys.readouterr().out
-    assert "ETH/USDT: veri reddedildi" in out
+    assert "ETH/USDT 15m: veri reddedildi" in out
     assert "BTC/USDT 15m: 1 kurulum" in out
 
 

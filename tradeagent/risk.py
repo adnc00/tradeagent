@@ -332,12 +332,12 @@ def check_ticket(ticket: OrderTicket, account_state: AccountState, limits: RiskL
             / equity
             * 100.0
         )
-        if group_pct > 0 and group_pct + risk_pct > limits.max_risk_pct + _PCT_TOL:
+        if group_pct > 0 and group_pct + risk_pct > limits.group_cap_pct + _PCT_TOL:
             reject(
                 "correlated_risk_limit",
                 f"Korelasyonlu grup '{group}' açık riski %{group_pct:.2f} + yeni %{risk_pct:.2f} = "
-                f"%{group_pct + risk_pct:.2f}; korelasyonlu pozisyonlar tek pozisyon sayılır "
-                f"(sınır %{limits.max_risk_pct:.2f}).",
+                f"%{group_pct + risk_pct:.2f}; korelasyonlu grubun toplam riski sınırlı "
+                f"(sınır %{limits.group_cap_pct:.2f}).",
             )
 
     if ticket.market == "futures" and geometry_ok and leverage_ok:

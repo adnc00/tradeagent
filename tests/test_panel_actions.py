@@ -214,3 +214,83 @@ def test_page_and_state_carry_the_same_version(server, config_path):
         page = response.read().decode("utf-8")
     assert f'name="panel-version" content="{tradeagent.__version__}"' in page
     assert panel.build_state(load_config(config_path))["version"] == tradeagent.__version__
+
+
+# --- edit a ticket before approving it -----------------------------------------------------------------
+
+
+def test_modify_changes_levels_risk_and_leverage(server, config_path):
+    ticket_id = scanned_ticket_id(config_path)
+    code, body = post(server, "/api/modify", {"ticket_id": ticket_id, "entry": 100.5, "stop": 99.2, "target": 104.5,
+                                              "risk_pct": 0.3, "leverage": 2})
+    assert code == 200, body
+    t = body["ticket"]
+    assert (t["entry"], t["stop"], t["targets"][0]) == (100.5, 99.2, 104.5)
+    assert body["metrics"]["risk_pct"] == pytest.approx(0.3, abs=0.03)
+    journal = Journal(load_config(config_path).journal_path)
+    try:
+        stored = journal.get_ticket(ticket_id)
+        assert (stored.entry, stored.stop, stored.risk_pct) == (100.5, 99.2, 0.3)
+    finally:
+        journal.close()
+
+
+def test_a_rescan_does_not_overwrite_the_users_edit(server, config_path):
+    ticket_id = scanned_ticket_id(config_path)
+    post(server, "/api/modify", {"ticket_id": ticket_id, "entry": 100.5, "stop": 99.2, "target": 104.5, "risk_pct": 0.3})
+    assert cli.main(["--config", str(config_path), "scan", "--symbols", "BTC/USDT"]) == 0
+    journal = Journal(load_config(config_path).journal_path)
+    try:
+        assert journal.get_ticket(ticket_id).entry == 100.5
+    finally:
+        journal.close()
+
+
+@pytest.mark.parametrize("levels", [
+    {"entry": 100.0, "stop": 101.0, "target": 104.0},   # stop above a long entry
+    {"entry": 100.0, "stop": 99.0, "target": 98.0},     # target below a long entry
+    {"entry": -1, "stop": 99.0, "target": 104.0},
+    {"entry": "abc", "stop": 99.0, "target": 104.0},
+])
+def test_modify_refuses_inconsistent_levels(server, config_path, levels):
+    ticket_id = scanned_ticket_id(config_path)
+    code, body = post(server, "/api/modify", {"ticket_id": ticket_id, "risk_pct": 0.5, **levels})
+    assert code == 400 and body["error"]
+
+
+def test_modify_refuses_risk_above_the_cap(server, config_path):
+    ticket_id = scanned_ticket_id(config_path)
+    code, body = post(server, "/api/modify", {"ticket_id": ticket_id, "entry": 100.5, "stop": 99.2, "target": 104.5,
+                                              "risk_pct": 50})
+    assert code == 400 and "risk" in body["error"].lower()
+
+
+# --- open your own long/short --------------------------------------------------------------------------
+
+
+def test_price_lookup_for_the_order_form(server):
+    code, body = post(server, "/api/price", {"symbol": "BTC/USDT"})
+    assert code == 200 and body["price"] > 0
+
+
+def test_manual_trade_becomes_a_ticket_that_goes_through_approval(server, config_path):
+    code, body = post(server, "/api/manual", {"symbol": "BTC/USDT", "side": "long", "entry": 100.9, "stop": 99.9,
+                                              "target": 104.0, "risk_pct": 0.5, "leverage": 1})
+    assert code == 200, body
+    ticket_id = body["ticket"]["id"]
+    assert ticket_id.startswith("t-m") and body["reasons"] == []
+    assert ticket_status(config_path, ticket_id) == "new"
+    assert post(server, "/api/execute", {"ticket_id": ticket_id, "confirm": "ONAY"})[0] == 200
+    assert ticket_status(config_path, ticket_id) == "submitted"
+
+
+def test_manual_short_on_spot_is_refused_by_the_risk_engine(server):
+    code, body = post(server, "/api/manual", {"symbol": "BTC/USDT", "side": "short", "entry": 100.9, "stop": 101.9,
+                                              "target": 97.0, "risk_pct": 0.5})
+    assert code == 200 and any("spot" in r.lower() or "short" in r.lower() for r in body["reasons"])
+
+
+def test_manual_trade_needs_an_allowed_symbol(server):
+    code, body = post(server, "/api/manual", {"symbol": "DOGE/USDT", "side": "long", "entry": 1.0, "stop": 0.9,
+                                              "target": 1.5, "risk_pct": 0.5})
+    assert code == 200 and any("izin" in r for r in body["reasons"])

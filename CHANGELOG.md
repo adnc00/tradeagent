@@ -2,6 +2,14 @@
 
 Biçim [Keep a Changelog](https://keepachangelog.com/tr-TR/1.1.0/), sürümler [SemVer](https://semver.org/lang/tr/).
 
+## [0.8.0] - 2026-11-26
+
+### Eklendi
+- Panelde bilet düzenleme (giriş, stop, hedef, risk %, kaldıraç) ve **Yeni işlem** formu (kendi long/short işleminiz; fiyatı getir, önizle, `ONAY`). Düzenlenen ve elle açılan biletler taramada üzerine yazılmaz. Rehber: `docs/ELLE-ISLEM.md`.
+- `risk.max_group_risk_pct`: aynı yöndeki korelasyonlu grubun toplam açık riski (0 = eski davranış, grup tek pozisyon).
+- `risk.margin_per_trade_pct`: futures'ta kaldıraç, bir işlemin teminatı bakiyenin bu payını aşmayacak kadar otomatik yükselir (en fazla `max_leverage`).
+- `--tf` birden çok zaman dilimi alır (`5m,15m`); izleme en kısa zaman diliminde uyanır.
+
 ## [0.7.0] - 2026-11-26
 
 ### Eklendi

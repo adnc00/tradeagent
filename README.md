@@ -137,6 +137,8 @@ python examples/paper_demo.py
 
 ### Tüm Binance coinleri (`--universe`)
 
+`--tf` birden fazla zaman dilimi alabilir (`--tf 5m,15m`); tarama en kısa zaman diliminde bir uyanır ve günlük bias verisi sembol başına bir kez indirilir.
+
 `--symbols` yerine `--universe` verilirse borsadaki bütün pariteler 24 saatlik işlem hacmine göre sıralanır ve en hacimli `universe.top` tanesi (varsayılan 100) taranır. `crypto.exchange: binanceusdm` ise USDT-M sürekli vadeliler (`BTC/USDT:USDT` …), `binance` ise spot pariteler gelir. Stabil coinler (USDC, FDUSD …), Binance'ın hisse, emtia ve endeks vadelileri (TradFi; ayrı sözleşme onayı ister, `universe.coins_only: true`), pasif pariteler, `universe.min_quote_volume` (10 milyon USDT) altı hacimliler ve `universe.exclude` listesi elenir. Bilet yalnızca `risk.allowlist`'e uyan sembollerde üretilir; allowlist desen kabul eder: `'*/USDT:USDT'` tüm USDT-M vadelileri kapsar. Liste her uyanışta yenilenir. 100 parite yaklaşık 1-1,5 dakikada taranır.
 
 Tüm USDT kriptolar aynı korelasyon grubunda sayılır: aynı anda açık olabilecek toplam kripto riski `risk.max_risk_pct` (%1) ile sınırlıdır. Yani çok sayıda coinde aynı anda fırsat çıksa bile ajan ancak birkaçına girer; piyasa birlikte düşerken çok sayıda pozisyonun birden zarar etmesi böyle önlenir.
@@ -192,6 +194,8 @@ tradeagent panel --live     # işlemler config'deki canlı/demo hesaba (ayrıca 
 **Panelden kontrol:**
 
 - **Onay bekleyenler:** geçerlilik süresi dolmamış her bilet burada. "İncele ve onayla" bileti gönderilecek hâliyle gösterir (borsaya göre yuvarlanmış fiyatlar, hesaba göre yeniden hesaplanmış miktar, risk tutarı ve yüzdesi, hedefte kazanç, likidasyon, hesap). Bir kontrol bileti reddederse nedenleri yazılır ve gönder butonu kapalı kalır. Göndermek için kutuya tam olarak `ONAY` yazılır. Sunucu gönderimden hemen önce risk motorunu ve bayat bilet kontrolünü yeniden çalıştırır. "Reddet" bileti göndermeden kapatır.
+- **Düzenle:** onay penceresinde giriş, stop, hedef, risk % ve kaldıraç değiştirilip "Değişiklikleri uygula" ile yeniden hesaplanır. Düzenlenen bilet sonraki taramalarda üzerine yazılmaz.
+- **Yeni işlem:** kendi long/short işleminizi tanımlayın (sembol, yön, giriş, stop, hedef, risk %, kaldıraç); aynı önizleme ve `ONAY` akışından geçer. Adım adım: [docs/ELLE-ISLEM.md](docs/ELLE-ISLEM.md).
 - **Girişi iptal et:** gönderilmiş ama dolmamış girişi, stop ve hedefiyle birlikte iptal eder. Giriş o arada dolduysa pozisyon ve koruması olduğu gibi kalır.
 - **Acil durdur:** tüm pozisyonları piyasa emriyle kapatır, kapandığı doğrulanan sembollerin emirlerini iptal eder (`ONAY` ister; `tradeagent kill` ile aynı).
 

@@ -174,6 +174,17 @@ dialog::backdrop { background: rgba(0,0,0,.62); }
 .notice { margin: 0; padding: 12px 14px; border-radius: 12px; background: var(--raised); color: var(--muted); }
 .notice.bad { background: var(--pill-negative-bg); color: var(--pill-negative-ink); }
 .notice.good { background: var(--pill-positive-bg); color: var(--pill-positive-ink); }
+.fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 14px; }
+.field { display: grid; gap: 6px; }
+.field label { color: var(--muted); font-size: 13px; }
+.field input, .field select { height: 40px; border-radius: 10px; border: 1px solid var(--control); background: var(--ground); color: var(--text); padding: 0 12px; font: 500 14px var(--font); font-variant-numeric: tabular-nums; min-width: 0; }
+.field input:focus-visible, .field select:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
+.field small { color: var(--faint); font-size: 12px; }
+.field.wide { grid-column: 1 / -1; }
+.seg { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.seg button { height: 40px; border-radius: 10px; border: 1px solid var(--control); background: var(--ground); color: var(--muted); font: 600 14px var(--font); cursor: pointer; }
+.seg button[aria-pressed="true"].long { background: var(--pill-positive-bg); color: var(--pill-positive-ink); border-color: transparent; }
+.seg button[aria-pressed="true"].short { background: var(--pill-negative-bg); color: var(--pill-negative-ink); border-color: transparent; }
 .confirm-field { display: grid; gap: 6px; }
 .confirm-field label { color: var(--muted); font-size: 13px; }
 .confirm-field input { height: 40px; border-radius: 10px; border: 1px solid var(--control); background: var(--ground); color: var(--text); padding: 0 12px; font: 500 15px var(--font); letter-spacing: .04em; }
@@ -203,7 +214,7 @@ dialog::backdrop { background: rgba(0,0,0,.62); }
   .kpi:nth-child(n+3) { border-top: 1px solid var(--rule); }
   .feed pre { margin-left: 0; }
 }
-@media (max-width: 760px) { .account { flex-wrap: wrap; justify-content: space-between; white-space: normal; } .account .btn { margin: 0; } .actions { justify-content: flex-start; } .facts { grid-template-columns: 1fr; gap: 2px; } .facts dd { margin-bottom: 8px; } }
+@media (max-width: 760px) { .fields { grid-template-columns: 1fr; } .account { flex-wrap: wrap; justify-content: space-between; white-space: normal; } .account .btn { margin: 0; } .actions { justify-content: flex-start; } .facts { grid-template-columns: 1fr; gap: 2px; } .facts dd { margin-bottom: 8px; } }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
@@ -235,7 +246,7 @@ dialog::backdrop { background: rgba(0,0,0,.62); }
       <span class="dot" id="dot"></span>
       <p id="status-line">Panel verisi yükleniyor…</p>
     </div>
-    <div class="account"><span id="account">-</span><button class="btn danger small" id="kill-btn" type="button">Acil durdur</button></div>
+    <div class="account"><span id="account">-</span><button class="btn small" id="new-btn" type="button">Yeni işlem</button><button class="btn danger small" id="kill-btn" type="button">Acil durdur</button></div>
   </header>
 
   <main id="ozet">
@@ -315,6 +326,7 @@ dialog::backdrop { background: rgba(0,0,0,.62); }
         <p class="lead" id="dlg-lead"></p>
         <dl class="facts" id="dlg-facts"></dl>
         <ul class="reasons" id="dlg-reasons" hidden></ul>
+        <div class="fields" id="dlg-fields" hidden></div>
         <div class="confirm-field" id="dlg-confirm" hidden>
           <label for="dlg-word">Onaylamak için tam olarak ONAY yazın</label>
           <input id="dlg-word" autocomplete="off" spellcheck="false" inputmode="text">
@@ -322,6 +334,7 @@ dialog::backdrop { background: rgba(0,0,0,.62); }
         <p class="notice" id="dlg-result" hidden></p>
         <div class="actions">
           <button class="btn" type="button" id="dlg-cancel">Vazgeç</button>
+          <button class="btn" type="button" id="dlg-alt" hidden>-</button>
           <button class="btn primary" type="button" id="dlg-ok" disabled>Onayla</button>
         </div>
       </form>
@@ -611,7 +624,53 @@ function renderAwaiting(s) {
 
 /* dialog */
 let dlgAction = null;
-function openDialog({ title, lead, facts, reasons, needWord, okText, okClass, onOk }) {
+function renderFields(fields) {
+  const box = $("dlg-fields");
+  box.textContent = "";
+  box.hidden = !(fields && fields.length);
+  for (const f of fields || []) {
+    const id = "f-" + f.key;
+    const wrap = el("div", { class: "field" + (f.wide ? " wide" : "") });
+    wrap.append(el("label", { for: id, text: f.label }));
+    if (f.type === "side") {
+      const seg = el("div", { class: "seg", role: "group", "aria-label": f.label });
+      for (const [v, text] of [["long", "Long (alış)"], ["short", "Short (açığa satış)"]]) {
+        const b = el("button", { type: "button", class: v, "data-side": v, "aria-pressed": String(f.value === v), text });
+        b.addEventListener("click", () => seg.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", String(x === b))));
+        seg.append(b);
+      }
+      seg.dataset.key = f.key;
+      wrap.append(seg);
+    } else {
+      const input = el("input", { id, inputmode: f.type === "text" ? "text" : "decimal", autocomplete: "off", spellcheck: "false" });
+      input.value = f.value == null ? "" : String(f.value);
+      if (f.placeholder) input.placeholder = f.placeholder;
+      input.dataset.key = f.key;
+      wrap.append(input);
+    }
+    if (f.hint) wrap.append(el("small", { text: f.hint }));
+    box.append(wrap);
+  }
+}
+function fieldValues() {
+  const out = {};
+  for (const node of $("dlg-fields").querySelectorAll("[data-key]")) {
+    if (node.classList.contains("seg")) {
+      const on = node.querySelector('button[aria-pressed="true"]');
+      out[node.dataset.key] = on ? on.dataset.side : "";
+    } else {
+      const raw = node.value.trim().replace(",", ".");
+      out[node.dataset.key] = raw;
+    }
+  }
+  return out;
+}
+let dlgAlt = null;
+function openDialog({ title, lead, facts, reasons, needWord, okText, okClass, onOk, fields, altText, onAlt }) {
+  renderFields(fields);
+  const alt = $("dlg-alt");
+  alt.hidden = !onAlt; alt.textContent = altText || ""; alt.disabled = false;
+  dlgAlt = onAlt || null;
   $("dlg-title").textContent = title;
   $("dlg-lead").textContent = lead || "";
   const dl = $("dlg-facts"); dl.textContent = "";
@@ -629,7 +688,7 @@ function openDialog({ title, lead, facts, reasons, needWord, okText, okClass, on
   ok.disabled = !!needWord || (reasons && reasons.length > 0);
   $("dlg-cancel").textContent = "Vazgeç";
   dlgAction = onOk ? { onOk, needWord } : null;
-  $("dlg").showModal();
+  if (!$("dlg").open) $("dlg").showModal();
   if (needWord && !ok.disabled) $("dlg-word").focus();
   if (needWord && reasons && reasons.length) ok.disabled = true;
   dlgAction && (dlgAction.blocked = !!(reasons && reasons.length));
@@ -643,13 +702,22 @@ $("dlg-word").addEventListener("input", () => {
   $("dlg-ok").disabled = dlgAction.blocked || $("dlg-word").value !== "ONAY";
 });
 $("dlg-cancel").addEventListener("click", () => $("dlg").close());
+$("dlg-alt").addEventListener("click", async () => {
+  if (!dlgAlt) return;
+  const alt = $("dlg-alt");
+  alt.disabled = true;
+  try { await dlgAlt(fieldValues()); }
+  catch (err) { showResult("Panel sunucusuna ulaşılamadı: " + err, "bad"); }
+  finally { alt.disabled = false; }
+});
 $("dlg-ok").addEventListener("click", async () => {
   if (!dlgAction) return;
   const ok = $("dlg-ok");
   ok.disabled = true; ok.textContent = "Gönderiliyor…";
   try {
     const word = $("dlg-word").value;
-    const { message, tone, done } = await dlgAction.onOk(word);
+    const { message, tone, done, keep } = await dlgAction.onOk(word);
+    if (keep) { showResult(message, tone); return; }
     showResult(message, tone);
     if (done) { ok.hidden = true; $("dlg-cancel").textContent = "Kapat"; dlgAction = null; refresh(); }
     else { ok.disabled = false; ok.textContent = "Tekrar dene"; }
@@ -660,11 +728,8 @@ $("dlg-ok").addEventListener("click", async () => {
 });
 
 function money2(v, cur) { return v == null ? "-" : n2.format(v) + (cur ? " " + cur : ""); }
-async function approveFlow(id) {
-  openDialog({ title: "Bilet hazırlanıyor…", lead: "Fiyat, hesap ve risk kontrolleri çalışıyor.", facts: [] });
-  const { ok, data } = await act("/api/preview", { ticket_id: id });
-  if (!ok) { openDialog({ title: "Bilet açılamadı", lead: data.error || "Bilinmeyen hata", facts: [] }); return; }
-  const t = data.ticket, m = data.metrics, a = data.account;
+function showPreview(data) {
+  const t = data.ticket, m = data.metrics, a = data.account, id = t.id;
   const side = t.side === "long" ? "LONG (alış)" : "SHORT (açığa satış)";
   openDialog({
     title: `${t.side === "long" ? "LONG" : "SHORT"} ${t.symbol}`,
@@ -676,15 +741,70 @@ async function approveFlow(id) {
       ["Risk (stop olursa)", `${money2(m.risk_amount, m.currency)} = %${m.risk_pct == null ? "-" : n2.format(m.risk_pct)}`],
       ["Hedefte kazanç", m.gain == null ? "-" : `${money2(m.gain, m.currency)} = %${n2.format(m.gain_pct)} (${n2.format(m.rr)}R)`],
       ["Likidasyon", m.liquidation == null ? "yok (kaldıraçsız)" : price(m.liquidation)],
-      ["Bilet", t.id],
+      ["Hesap bakiyesi", money2(m.equity, m.currency)],
+      ["Bilet", id],
     ],
     reasons: data.reasons,
+    fields: [
+      { key: "entry", label: "Giriş (limit)", value: t.entry },
+      { key: "stop", label: "Stop", value: t.stop },
+      { key: "target", label: "Hedef", value: t.targets[0] },
+      { key: "risk_pct", label: "Risk % (bakiyenin)", value: null, placeholder: "ayardaki", hint: "Miktar bu riske göre hesaplanır." },
+      { key: "leverage", label: "Kaldıraç (en az)", value: null, placeholder: "otomatik", hint: "Boş: teminata göre otomatik." },
+    ],
+    altText: "Değişiklikleri uygula",
+    onAlt: async (v) => {
+      const r = await act("/api/modify", { ticket_id: id, ...v });
+      if (!r.ok) { showResult(r.data.error || "Güncellenemedi", "bad"); return; }
+      showPreview(r.data);
+      showResult("Bilet güncellendi; yeni değerler yukarıda. Göndermek için ONAY yazın.", "good");
+    },
     needWord: true, okText: "Emri gönder", okClass: a.real_money ? "danger" : "primary",
     onOk: async (word) => {
       const r = await act("/api/execute", { ticket_id: id, confirm: word });
       if (r.ok) return { message: "Emir gönderildi: giriş, stop ve hedef borsada. " + (r.data.lines || []).join(" "), tone: "good", done: true };
       const extra = (r.data.reasons || []).join(" · ");
       return { message: (r.data.error || "Gönderilemedi") + (extra ? " " + extra : ""), tone: "bad", done: r.status === 409 };
+    },
+  });
+}
+async function approveFlow(id) {
+  openDialog({ title: "Bilet hazırlanıyor…", lead: "Fiyat, hesap ve risk kontrolleri çalışıyor.", facts: [] });
+  const { ok, data } = await act("/api/preview", { ticket_id: id });
+  if (!ok) { openDialog({ title: "Bilet açılamadı", lead: data.error || "Bilinmeyen hata", facts: [] }); return; }
+  showPreview(data);
+}
+function newTradeFlow(prefill) {
+  const p = prefill || {};
+  openDialog({
+    title: "Yeni işlem",
+    lead: "Kendi long/short işleminizi tanımlayın. Önizlemede miktar, kaldıraç, risk ve likidasyon hesaplanır; emir yalnızca ONAY yazınca gider.",
+    facts: [],
+    fields: [
+      { key: "symbol", label: "Sembol", value: p.symbol || "", placeholder: "BTC/USDT:USDT", type: "text", wide: true,
+        hint: "Vadeli: COIN/USDT:USDT (long ve short). Spot: COIN/USDT (yalnızca long)." },
+      { key: "side", label: "Yön", type: "side", value: p.side || "long", wide: true },
+      { key: "entry", label: "Giriş (limit)", value: p.entry, placeholder: "Fiyatı getir'e basın" },
+      { key: "stop", label: "Stop", value: p.stop, hint: "Long: girişin altında · Short: üstünde" },
+      { key: "target", label: "Hedef (take-profit)", value: p.target, hint: "Long: girişin üstünde · Short: altında" },
+      { key: "risk_pct", label: "Risk % (bakiyenin)", value: p.risk_pct, placeholder: "ayardaki" },
+      { key: "leverage", label: "Kaldıraç (en az)", value: p.leverage, placeholder: "otomatik", hint: "Boş: teminata göre otomatik." },
+    ],
+    altText: "Fiyatı getir",
+    onAlt: async (v) => {
+      const r = await act("/api/price", { symbol: v.symbol });
+      if (!r.ok) { showResult(r.data.error || "Fiyat alınamadı", "bad"); return; }
+      const entry = document.querySelector('#dlg-fields [data-key="entry"]');
+      entry.value = String(r.data.price);
+      showResult(`${r.data.symbol} şu an ${price(r.data.price)} (${r.data.market}). Ayardaki risk %${n2.format(r.data.risk_pct)}, en fazla %${n2.format(r.data.max_risk_pct)}; kaldıraç en fazla ${r.data.max_leverage}x.`, "");
+    },
+    okText: "Önizle", okClass: "primary",
+    onOk: async () => {
+      const v = fieldValues();
+      const r = await act("/api/manual", v);
+      if (!r.ok) return { message: r.data.error || "Bilet oluşturulamadı", tone: "bad", done: false };
+      showPreview(r.data);
+      return { message: "Bilet oluşturuldu. Değerleri kontrol edip göndermek için ONAY yazın.", tone: "", done: false, keep: true };
     },
   });
 }
@@ -732,6 +852,7 @@ document.addEventListener("click", (e) => {
   else if (b.dataset.cancel) cancelFlow(b.dataset.cancel);
 });
 $("kill-btn").addEventListener("click", killFlow);
+$("new-btn").addEventListener("click", () => newTradeFlow());
 
 const drawn = {};
 function changed(key, value) {

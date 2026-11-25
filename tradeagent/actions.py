@@ -8,11 +8,16 @@ panel. Cancelling an unfilled entry and dismissing an unsent ticket only reduce
 risk and need no word. Nothing here runs without a request from the panel page.
 """
 
-from dataclasses import dataclass, field
+import math
+import re
+import secrets
+from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
 from typing import Any
 
 from tradeagent import cli
-from tradeagent.journal import Journal
+from tradeagent.brokers.data import market_type
+from tradeagent.journal import USER_PREFIX, Journal
 from tradeagent.models import OrderTicket
 from tradeagent.risk import ticket_metrics
 
@@ -170,10 +175,120 @@ def kill(cfg, live: bool, body: dict[str, Any]) -> dict[str, Any]:
     return {"problems": problems}
 
 
+# --- edit a ticket / open one by hand -----------------------------------------------------------------
+
+
+def _number(body: dict[str, Any], key: str, label: str) -> float:
+    value = body.get(key)
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise ActionError(400, f"{label} geçerli bir sayı olmalı.") from None
+    if not math.isfinite(number) or number <= 0:
+        raise ActionError(400, f"{label} pozitif bir sayı olmalı.")
+    return number
+
+
+def _levels(side: str, body: dict[str, Any]) -> tuple[float, float, float]:
+    entry = _number(body, "entry", "Giriş")
+    stop = _number(body, "stop", "Stop")
+    target = _number(body, "target", "Hedef")
+    if side == "long" and not stop < entry < target:
+        raise ActionError(400, "Long için stop < giriş < hedef olmalı.")
+    if side == "short" and not target < entry < stop:
+        raise ActionError(400, "Short için hedef < giriş < stop olmalı.")
+    return entry, stop, target
+
+
+def _risk_pct(cfg, body: dict[str, Any]) -> float:
+    if body.get("risk_pct") in (None, ""):
+        return cfg.risk.risk_pct
+    value = _number(body, "risk_pct", "Risk yüzdesi")
+    if value > cfg.risk.max_risk_pct:
+        raise ActionError(400, f"Risk yüzdesi %{value:g}, üst sınır %{cfg.risk.max_risk_pct:g} (config: risk.max_risk_pct).")
+    return value
+
+
+def _leverage(cfg, body: dict[str, Any], default: float) -> float:
+    if body.get("leverage") in (None, "", "auto"):
+        return default
+    value = _number(body, "leverage", "Kaldıraç")
+    if not value.is_integer() or not 1 <= value <= cfg.risk.max_leverage:
+        raise ActionError(400, f"Kaldıraç 1 ile {cfg.risk.max_leverage:g} arasında tam sayı olmalı.")
+    return value
+
+
+def modify(cfg, live: bool, body: dict[str, Any]) -> dict[str, Any]:
+    journal = Journal(cfg.journal_path)
+    try:
+        ticket = _load(journal, body.get("ticket_id"), status="new")
+        entry, stop, target = _levels(ticket.side.value, body)
+        sign = ticket.side.sign
+        targets = [target] + [t for t in ticket.targets[1:] if (t - target) * sign > 0]
+        edited = replace(
+            ticket, entry=entry, stop=stop, targets=targets, risk_pct=_risk_pct(cfg, body),
+            leverage=_leverage(cfg, body, ticket.leverage), reason=f"{USER_PREFIX} panelden düzenlendi",
+        )
+        journal.save_user_ticket(edited)
+        journal.add_ticket_note(
+            ticket.id, f"panelden düzenlendi: giriş {entry:g}, stop {stop:g}, hedef {target:g}, "
+            f"risk %{edited.risk_pct:g}, kaldıraç {edited.leverage:g}x"
+        )
+        broker, prepared, state, reasons = _prepared(cfg, live, journal, journal.get_ticket(ticket.id))
+        return _preview_body(cfg, live, broker, prepared, state, reasons)
+    finally:
+        journal.close()
+
+
+_SYMBOL = re.compile(r"^[A-Z0-9]{1,20}(/[A-Z0-9]{1,10}(:[A-Z0-9]{1,10})?|\.IS)?$")
+
+
+def _symbol(body: dict[str, Any]) -> str:
+    symbol = str(body.get("symbol") or "").strip().upper()
+    if not _SYMBOL.match(symbol):
+        raise ActionError(400, "Sembol biçimi: BTC/USDT:USDT (vadeli), BTC/USDT (spot), AAPL veya THYAO.IS.")
+    return symbol
+
+
+def manual(cfg, live: bool, body: dict[str, Any]) -> dict[str, Any]:
+    symbol = _symbol(body)
+    side = str(body.get("side") or "").lower()
+    if side not in ("long", "short"):
+        raise ActionError(400, "Yön long ya da short olmalı.")
+    entry, stop, target = _levels(side, body)
+    ticket = OrderTicket(
+        id="t-m" + secrets.token_hex(4), setup_id="manual", symbol=symbol, side=side, entry=entry, stop=stop,
+        targets=[target], qty=0.0, leverage=_leverage(cfg, body, cfg.scanner.leverage), risk_pct=_risk_pct(cfg, body),
+        fee_rate=cfg.fee_rate, market=market_type(symbol, cfg.crypto.exchange), timeframe="elle",
+        reason=f"{USER_PREFIX} panelden elle açıldı", created_at=datetime.now(UTC),
+    )
+    journal = Journal(cfg.journal_path)
+    try:
+        journal.save_user_ticket(ticket)
+        journal.add_ticket_note(ticket.id, "panelden elle oluşturuldu")
+        broker, prepared, state, reasons = _prepared(cfg, live, journal, ticket)
+        return _preview_body(cfg, live, broker, prepared, state, reasons)
+    finally:
+        journal.close()
+
+
+def price(cfg, live: bool, body: dict[str, Any]) -> dict[str, Any]:
+    symbol = _symbol(body)
+    broker = cli.make_broker(cfg, symbol, live)
+    value = cli.current_price(broker, cfg, symbol)
+    if value is None:
+        raise ActionError(502, f"{symbol} için fiyat alınamadı.")
+    return {"symbol": symbol, "price": value, "market": market_type(symbol, cfg.crypto.exchange),
+            "risk_pct": cfg.risk.risk_pct, "max_risk_pct": cfg.risk.max_risk_pct, "max_leverage": cfg.risk.max_leverage}
+
+
 ACTIONS = {
     "/api/preview": preview,
     "/api/execute": execute,
     "/api/dismiss": dismiss,
     "/api/cancel": cancel,
     "/api/kill": kill,
+    "/api/modify": modify,
+    "/api/manual": manual,
+    "/api/price": price,
 }

@@ -69,7 +69,7 @@ Bu komut bir kez tarar, uygun bilet varsa demo hesapta gönderir ve çıkar. Yak
 ## 6. 7/24 başlatın
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\install-watch-task.ps1 -Universe -Live -DemoAuto
+powershell -ExecutionPolicy Bypass -File .\scripts\install-watch-task.ps1 -Universe -Live -DemoAuto -Tf "5m,15m"
 ```
 
 - Görev hemen başlar ve her oturum açılışında yeniden başlar. Çökerse 1 dakika sonra yeniden başlar.

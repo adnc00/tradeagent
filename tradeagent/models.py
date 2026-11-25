@@ -23,6 +23,8 @@ RISK_LIMIT_RANGES: dict[str, tuple[float, float]] = {
     "min_rr": (0.1, 20.0),
     "mmr": (0.0, 0.5),
     "liq_stop_multiple": (1.0, 20.0),
+    "max_group_risk_pct": (0.0, 50.0),
+    "margin_per_trade_pct": (0.0, 100.0),
 }
 
 
@@ -74,6 +76,11 @@ class RiskLimits:
     mmr: float = 0.01
     liq_stop_multiple: float = 2.0
     allowlist: tuple[str, ...] = ()
+    # Open risk allowed in one correlated group (e.g. all USDT crypto longs); 0 = same as max_risk_pct,
+    # i.e. the group counts as a single position.
+    max_group_risk_pct: float = 0.0
+    # Futures: raise the leverage so one trade's margin stays within this % of equity (0 = off).
+    margin_per_trade_pct: float = 0.0
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "allowlist", tuple(self.allowlist))
@@ -87,6 +94,12 @@ class RiskLimits:
             raise ValueError("risk.max_risk_pct, risk.max_open_risk_pct değerini aşamaz")
         if self.daily_loss_pct > self.weekly_loss_pct:
             raise ValueError("risk.daily_loss_pct, risk.weekly_loss_pct değerini aşamaz")
+        if self.max_group_risk_pct and not (self.max_risk_pct <= self.max_group_risk_pct <= self.max_open_risk_pct):
+            raise ValueError("risk.max_group_risk_pct, max_risk_pct ile max_open_risk_pct arasında olmalı (0 = kapalı)")
+
+    @property
+    def group_cap_pct(self) -> float:
+        return self.max_group_risk_pct or self.max_risk_pct
 
 
 @dataclass(frozen=True, slots=True)

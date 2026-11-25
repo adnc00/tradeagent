@@ -309,15 +309,25 @@ def account_state(broker: Broker, journal: Journal, exclude: str | None = None, 
     return AccountState(equity=equity, day_start_equity=day_start, week_start_equity=week_start, open_risks=open_risks)
 
 
-def resize_for_account(ticket: OrderTicket, equity: float, broker: Broker) -> OrderTicket:
-    """Re-size to the executing account's equity at the ticket's intended risk %."""
+def resize_for_account(ticket: OrderTicket, equity: float, broker: Broker, limits=None) -> OrderTicket:
+    """Re-size to the executing account's equity at the ticket's intended risk %.
+
+    With ``limits.margin_per_trade_pct`` a futures ticket's leverage is raised (up to
+    ``max_leverage``) so its margin stays within that share of equity.
+    """
     if ticket.stop is None:
         return ticket
     try:
         qty = position_size(equity, ticket.risk_pct, ticket.entry, ticket.stop, ticket.fee_rate)
     except ValueError:
         return ticket
-    return replace(ticket, qty=broker.normalize_qty(ticket.symbol, floor_to_step(qty, lot_step(ticket.symbol))))
+    sized = replace(ticket, qty=broker.normalize_qty(ticket.symbol, floor_to_step(qty, lot_step(ticket.symbol))))
+    share = getattr(limits, "margin_per_trade_pct", 0.0) if limits is not None else 0.0
+    if share > 0 and sized.market == "futures" and equity > 0 and sized.qty > 0:
+        needed = math.ceil(sized.qty * sized.entry / (equity * share / 100.0) - 1e-9)
+        leverage = float(min(max(sized.leverage, needed), limits.max_leverage))
+        sized = replace(sized, leverage=float(math.floor(leverage)))
+    return sized
 
 
 def current_price(broker: Broker, cfg: Config, symbol: str) -> float | None:
@@ -376,7 +386,7 @@ def prepare_ticket(
             prepared.symbol, prepared.side, prepared.entry, prepared.stop, prepared.targets
         )
         prepared = replace(prepared, entry=entry, stop=stop, targets=targets)
-    prepared = resize_for_account(prepared, state.equity, broker)
+    prepared = resize_for_account(prepared, state.equity, broker, cfg.risk)
     reasons = [v.message for v in check_ticket(prepared, state, cfg.risk)]
     if not reasons:
         reasons.extend(broker.venue_problems(prepared))
@@ -478,47 +488,53 @@ def run_scan(
 
     ``quiet`` hides the per-symbol "no setup" lines (useful when scanning hundreds of pairs).
     """
+    frames = parse_timeframes(tf)
     data = MarketData(cfg.crypto.exchange)
     broker = paper_broker(cfg)
     state = account_state(broker, journal)
     evaluated: list[Setup] = []
     for symbol in symbols:
         try:
-            ltf = data.get_ohlcv(symbol, tf, limit)
             htf_df = data.get_ohlcv(symbol, htf, limit)
         except Exception as exc:  # one symbol's data outage must not stop the scan
             print(f"{symbol}: veri alınamadı ({exc})")
             continue
-        now = datetime.now(UTC)
-        try:
-            setups = scan_symbol(
-                symbol,
-                closed_candles(ltf, tf, now),
-                htf_df,
-                timeframe=tf,
-                account=state,
-                limits=cfg.risk,
-                params=cfg.scanner,
-                fee_rate=cfg.fee_rate,
-                market=market_type(symbol, cfg.crypto.exchange),
-                now=now,
-            )
-        except ValueError as exc:
-            print(f"{symbol}: veri reddedildi ({exc})")
-            continue
-        if not setups:
-            if not quiet:
-                print(f"{symbol} {tf}: kurulum yok.")
-            continue
-        print(f"{symbol} {tf}: {len(setups)} kurulum")
-        for setup in setups:
-            existing = journal.get_ticket("t-" + setup.id.removeprefix("s-"))
-            journal.save_setup(setup)
-            if existing is not None and existing.status != "new":
-                print(f"  [{setup.id}] bilet {existing.id} zaten '{existing.status}' durumunda; yeniden değerlendirilmedi.")
+        for frame in frames:
+            try:
+                ltf = data.get_ohlcv(symbol, frame, limit)
+            except Exception as exc:
+                print(f"{symbol} {frame}: veri alınamadı ({exc})")
                 continue
-            print_setup(setup)
-            evaluated.append(setup)
+            now = datetime.now(UTC)
+            try:
+                setups = scan_symbol(
+                    symbol,
+                    closed_candles(ltf, frame, now),
+                    htf_df,
+                    timeframe=frame,
+                    account=state,
+                    limits=cfg.risk,
+                    params=cfg.scanner,
+                    fee_rate=cfg.fee_rate,
+                    market=market_type(symbol, cfg.crypto.exchange),
+                    now=now,
+                )
+            except ValueError as exc:
+                print(f"{symbol} {frame}: veri reddedildi ({exc})")
+                continue
+            if not setups:
+                if not quiet:
+                    print(f"{symbol} {frame}: kurulum yok.")
+                continue
+            print(f"{symbol} {frame}: {len(setups)} kurulum")
+            for setup in setups:
+                existing = journal.get_ticket("t-" + setup.id.removeprefix("s-"))
+                journal.save_setup(setup)
+                if existing is not None and existing.status != "new":
+                    print(f"  [{setup.id}] bilet {existing.id} zaten '{existing.status}' durumunda; yeniden değerlendirilmedi.")
+                    continue
+                print_setup(setup)
+                evaluated.append(setup)
     if quiet:
         print(f"{len(symbols)} sembol tarandı, {len(evaluated)} yeni değerlendirme.")
     return evaluated
@@ -545,6 +561,20 @@ def resolve_symbols(args: argparse.Namespace, cfg: Config) -> list[str]:
         f"izin listesine uyan {len(allowed)} taranacak."
     )
     return allowed
+
+
+def parse_timeframes(text: str) -> list[str]:
+    """``"5m,15m"`` -> ``["5m", "15m"]``; unknown timeframes raise ``ValueError``."""
+    frames = [t.strip() for t in str(text).split(",") if t.strip()]
+    unknown = [t for t in frames if t not in _TIMEFRAMES]
+    if not frames or unknown:
+        raise ValueError(f"geçersiz zaman dilimi: {', '.join(unknown) or text!r} (geçerli: {', '.join(_TIMEFRAMES)})")
+    return frames
+
+
+def default_interval(frames: list[str]) -> int:
+    """Wake-up interval in minutes: the shortest timeframe."""
+    return int(min(_TIMEFRAMES[t] for t in frames).total_seconds() // 60)
 
 
 def parse_symbols(text: str) -> list[str]:
@@ -1160,10 +1190,12 @@ def write_watch_status(cfg: Config, status: dict) -> None:
 
 
 def cmd_watch(args: argparse.Namespace, cfg: Config) -> int:
-    interval = args.interval
-    if interval is None:
-        frame = _TIMEFRAMES.get(args.tf)
-        interval = int(frame.total_seconds() // 60) if frame is not None else 15
+    try:
+        frames = parse_timeframes(args.tf)
+    except ValueError as exc:
+        print(f"Hata: {exc}")
+        return EXIT_REJECTED
+    interval = args.interval if args.interval is not None else default_interval(frames)
     if not 1 <= interval <= 1440:
         print("Hata: --interval 1 ile 1440 dakika arasında olmalı.")
         return EXIT_REJECTED

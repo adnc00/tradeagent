@@ -23,6 +23,8 @@ DEFAULT_JOURNAL_PATH = Path.home() / "trading-agent" / "data" / "journal.sqlite"
 # claim taken before anything is sent; "unknown" means the venue state could
 # not be verified after an attempt.
 OPEN_STATUSES = ("submitting", "submitted", "open", "unknown")
+# Tickets the user edited or opened by hand carry this reason prefix; a rescan never rewrites them.
+USER_PREFIX = "elle:"
 
 
 class JournalError(RuntimeError):
@@ -276,9 +278,14 @@ class Journal:
                 ),
             )
             if setup.ticket is not None:
-                self._write_ticket(setup.ticket, only_if_new=True)
+                self._write_ticket(setup.ticket, only_if_new=True, keep_user_edits=True)
 
-    def _write_ticket(self, ticket: OrderTicket, *, only_if_new: bool) -> None:
+    def save_user_ticket(self, ticket: OrderTicket) -> None:
+        """Insert a hand-made ticket or store the user's edit of a ``new`` one."""
+        with self._conn:
+            self._write_ticket(ticket, only_if_new=True)
+
+    def _write_ticket(self, ticket: OrderTicket, *, only_if_new: bool, keep_user_edits: bool = False) -> None:
         try:
             risk_amount: float | None = ticket_risk_amount(ticket)
         except ValueError:
@@ -289,6 +296,8 @@ class Journal:
         except ValueError:
             ratio = None
         guard = "WHERE tickets.status = 'new'" if only_if_new else ""
+        if keep_user_edits:
+            guard += f" AND COALESCE(tickets.reason, '') NOT LIKE '{USER_PREFIX}%'"
         self._conn.execute(
             f"""
             INSERT INTO tickets (id, setup_id, created_at, symbol, timeframe, side, market, entry, stop, targets,
