@@ -339,7 +339,18 @@ class CcxtBroker(Broker):
         try:
             exchange.set_leverage(int(ticket.leverage), symbol)
         except ccxt.BaseError as exc:
-            raise BrokerError(f"Kaldıraç ayarlanamadı ({exc}); emir gönderilmedi.") from exc
+            # -4028: above this symbol's maximum. A lower leverage keeps the same risk (size is set by the
+            # stop) and only moves the liquidation further away, so retry once at the symbol's maximum.
+            if "-4028" not in str(exc):
+                raise BrokerError(f"Kaldıraç ayarlanamadı ({exc}); emir gönderilmedi.") from exc
+            try:
+                tiers = exchange.fetch_market_leverage_tiers(symbol)
+                maximum = int(max(float(t.get("maxLeverage") or 0) for t in tiers))
+                if not 1 <= maximum < int(ticket.leverage):
+                    raise BrokerError(f"Kaldıraç ayarlanamadı ({exc}); emir gönderilmedi.") from exc
+                exchange.set_leverage(maximum, symbol)
+            except ccxt.BaseError as retry_exc:
+                raise BrokerError(f"Kaldıraç ayarlanamadı ({retry_exc}); emir gönderilmedi.") from retry_exc
 
         ids = client_order_ids(ticket.id)
         entry_side, exit_side = ticket.side.entry_action, ticket.side.exit_action

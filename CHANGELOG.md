@@ -9,6 +9,7 @@ Biçim [Keep a Changelog](https://keepachangelog.com/tr-TR/1.1.0/), sürümler [
 - `risk.max_group_risk_pct`: aynı yöndeki korelasyonlu grubun toplam açık riski (0 = eski davranış, grup tek pozisyon).
 - `risk.margin_per_trade_pct`: futures'ta kaldıraç, bir işlemin teminatı bakiyenin bu payını aşmayacak kadar otomatik yükselir (en fazla `max_leverage`).
 - `--tf` birden çok zaman dilimi alır (`5m,15m`); izleme en kısa zaman diliminde uyanır.
+- Binance bir coinin kaldıraç üst sınırını aşan isteği reddederse (-4028) kaldıraç o coinin sınırına indirilip bir kez daha denenir (risk aynı kalır, likidasyon uzaklaşır).
 
 ## [0.7.0] - 2026-11-26
 

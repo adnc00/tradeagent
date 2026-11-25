@@ -373,3 +373,19 @@ def test_signed_requests_compensate_for_clock_drift():
     broker = CcxtBroker("binanceusdm", testnet=True, env=env_for("binanceusdm"))
     assert broker._exchange.options.get("adjustForTimeDifference") is True
     assert broker._exchange.options.get("recvWindow") == 10_000
+
+
+def test_leverage_above_the_symbol_maximum_is_lowered_to_it():
+    fake = FakeExchange()
+    calls = []
+
+    def set_leverage(leverage, symbol):
+        calls.append(leverage)
+        if leverage > 10:
+            raise ccxt.BadRequest('binanceusdm {"code":-4028,"msg":"Leverage 14 is not valid"}')
+
+    fake.set_leverage = set_leverage
+    fake.fetch_market_leverage_tiers = lambda symbol, params=None: [{"maxLeverage": 10}, {"maxLeverage": 5}]
+    results = broker_with(fake).place_bracket(make_ticket(leverage=14.0))
+    assert calls == [14, 10]
+    assert {r.role for r in results} == {"entry", "stop", "take_profit"}
