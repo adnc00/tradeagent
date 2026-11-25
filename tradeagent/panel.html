@@ -700,7 +700,11 @@ function drawCandles(svg, candles, lines) {
   svg.textContent = "";
   const add = (tag, attrs, text) => { const n = document.createElementNS(ns, tag); for (const k in attrs) n.setAttribute(k, attrs[k]); if (text != null) n.textContent = text; svg.append(n); return n; };
   if (!candles.length) { add("text", { x: 12, y: 24 }, "Mum verisi yok."); return; }
-  const prices = candles.flatMap(c => [c[2], c[3]]).concat(lines.map(l => l.price).filter(v => v != null));
+  const bars = candles.flatMap(c => [c[2], c[3]]);
+  const span = Math.max(...bars) - Math.min(...bars) || Math.max(...bars) * 0.01;
+  const near = v => v >= Math.min(...bars) - span * 1.5 && v <= Math.max(...bars) + span * 1.5;
+  const levels = lines.filter(l => l.price != null && near(l.price)).map(l => l.price);
+  const prices = bars.concat(levels);
   let lo = Math.min(...prices), hi = Math.max(...prices);
   const pad = (hi - lo) * 0.06 || hi * 0.01; lo -= pad; hi += pad;
   const y = v => T + (hi - v) / (hi - lo) * (H - T - B);
@@ -713,6 +717,11 @@ function drawCandles(svg, candles, lines) {
   });
   for (const ln of lines) {
     if (ln.price == null) continue;
+    if (!near(ln.price)) {
+      const below = ln.price < lo;
+      add("text", { x: W - R + 8, y: below ? H - B - 4 : T + 10, fill: ln.color }, `${ln.label} ${price(ln.price)} ${below ? "↓" : "↑"}`);
+      continue;
+    }
     add("line", { x1: L, x2: W - R + 4, y1: y(ln.price), y2: y(ln.price), stroke: ln.color, "stroke-width": 1.2, "stroke-dasharray": ln.dash || "" });
     add("text", { x: W - R + 8, y: y(ln.price) + 4, fill: ln.color }, `${ln.label} ${price(ln.price)}`);
   }

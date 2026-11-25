@@ -255,3 +255,22 @@ def test_close_fraction_must_be_sane(config_path, monkeypatch, fraction):
 def test_candles_action_returns_ohlc_for_the_chart(config_path):
     body = actions.candles(load_config(config_path), False, {"symbol": "BTC/USDT", "timeframe": "15m"})
     assert len(body["candles"]) > 10 and len(body["candles"][0]) == 5
+
+
+def test_leverage_falls_back_to_notional_over_initial_margin():
+    fake = FakeExchange()
+    holding(fake, leverage=None, notional=11_747.5, initialMargin=93.98)
+    (p,) = broker_with(fake).get_positions()
+    assert p.leverage == pytest.approx(125.0, abs=0.1)
+
+
+def test_risk_card_shows_the_group_cap(tmp_path):
+    from tradeagent import panel
+
+    path = write_config(tmp_path)
+    extra_limits = "risk:\n  max_risk_pct: 1.0\n  max_open_risk_pct: 15.0\n  max_group_risk_pct: 15.0\n"
+    path.write_text(path.read_text(encoding="utf-8").replace("risk:\n", extra_limits, 1), encoding="utf-8")
+    cfg = load_config(path)
+    assert cfg.risk.group_cap_pct == 15.0
+    state = panel.build_state(cfg)
+    assert state["risk"]["group_cap_pct"] == cfg.risk.group_cap_pct

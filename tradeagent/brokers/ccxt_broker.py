@@ -61,6 +61,16 @@ def client_order_ids(ticket_id: str) -> dict[str, str]:
     return {role: f"{ticket_id}-{suffix}" for role, suffix in _LEG_SUFFIX.items()}
 
 
+def _position_leverage(raw: dict[str, Any]) -> float | None:
+    """Binance's position endpoint may omit leverage; notional / initial margin gives it."""
+    if raw.get("leverage") is not None:
+        return float(raw["leverage"])
+    notional, margin = raw.get("notional"), raw.get("initialMargin")
+    if notional and margin and float(margin) > 0:
+        return round(abs(float(notional)) / float(margin), 1)
+    return None
+
+
 def _role_of(order: dict[str, Any]) -> str:
     client_id = str(order.get("clientOrderId") or "")
     for role, suffix in _LEG_SUFFIX.items():
@@ -224,7 +234,7 @@ class CcxtBroker(Broker):
                     qty=contracts * float(raw.get("contractSize") or 1.0),
                     entry_price=float(raw["entryPrice"]) if raw.get("entryPrice") is not None else None,
                     unrealized_pnl=float(raw["unrealizedPnl"]) if raw.get("unrealizedPnl") is not None else None,
-                    leverage=float(raw["leverage"]) if raw.get("leverage") is not None else None,
+                    leverage=_position_leverage(raw),
                     liquidation=float(raw["liquidationPrice"]) if raw.get("liquidationPrice") else None,
                     mark_price=float(raw["markPrice"]) if raw.get("markPrice") is not None else None,
                 )

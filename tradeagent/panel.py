@@ -242,7 +242,7 @@ def build_state(cfg: Config, now: datetime | None = None, *, live: bool = False)
         "open_risk": open_risk,
         "open_risk_pct": open_risk / equity * 100.0 if equity else None,
         "max_open_risk_pct": cfg.risk.max_open_risk_pct,
-        "group_cap_pct": cfg.risk.max_risk_pct,
+        "group_cap_pct": cfg.risk.group_cap_pct,
         "day_loss_pct": day_loss,
         "daily_loss_limit_pct": cfg.risk.daily_loss_pct,
     }
