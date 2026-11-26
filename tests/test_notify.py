@@ -253,3 +253,12 @@ def test_telegram_error_carries_the_api_description():
         notify.TelegramNotifier("123:SECRET", "123", opener=opener).send(notify.Alert("a", "b"))
     assert "can't send messages to the bot" in str(excinfo.value)
     assert "SECRET" not in str(excinfo.value)
+
+
+def test_alert_carries_the_beginner_explanation():
+    alert = notify.ticket_alert(
+        long_ticket(), equity=10_000.0, mmr=0.01, stats=stats(0), narrative="kısa", killzone=None, valid_minutes=60,
+        action="", explanation=[("1. Genel yön", "Fiyat yukarı yönlü."), ("5. Stop neden orada?", "Dibin altında.")],
+    )
+    assert "Neden bu işlem?" in alert.body
+    assert "1. Genel yön: Fiyat yukarı yönlü." in alert.body

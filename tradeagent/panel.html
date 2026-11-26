@@ -162,6 +162,28 @@ footer { color: var(--faint); font-size: var(--fs-small); display: flex; justify
 .chart-tf button[aria-pressed="true"] { background: var(--text); color: #000; border-color: var(--text); }
 .dlg-cols { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 18px; align-items: start; }
 @media (max-width: 860px) { .dlg-cols { grid-template-columns: 1fr; } }
+.dlg-cols:has(#dlg-chart[hidden]) { grid-template-columns: 1fr; }
+.dlg-cols:has(#dlg-chart[hidden]) #dlg-left { display: none; }
+
+/* god mode switch */
+.god-switch { display: inline-flex; align-items: center; gap: 10px; height: 32px; padding: 0 12px 0 6px; border-radius: 999px; border: 1px solid var(--control); background: transparent; color: var(--muted); font: 600 12px var(--font); letter-spacing: .04em; cursor: pointer; }
+.god-switch .knob-track { width: 38px; height: 22px; border-radius: 999px; background: var(--raised); position: relative; transition: background-color .2s ease; }
+.god-switch .knob { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--muted); transition: transform .2s ease, background-color .2s ease; }
+.god-switch[aria-checked="true"] { color: var(--warning); border-color: var(--warning); }
+.god-switch[aria-checked="true"] .knob-track { background: var(--pill-warning-bg); }
+.god-switch[aria-checked="true"] .knob { transform: translateX(16px); background: var(--warning); }
+.god-card.on { box-shadow: inset 0 0 0 1px var(--warning); }
+.god-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 24px; }
+.god-grid div label { display: block; color: var(--muted); font-size: 13px; }
+.god-grid div output { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+@media (max-width: 760px) { .god-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* dialog: warnings and the explanation */
+.warnings { margin: 0; padding: 12px 14px 12px 30px; background: var(--pill-warning-bg); color: var(--pill-warning-ink); border-radius: 12px; }
+.explain { background: var(--raised); border-radius: 12px; padding: 14px 16px; display: grid; gap: 8px; }
+.explain h3 { margin: 0; font-size: 15px; }
+.explain p { margin: 0; color: var(--muted); line-height: 1.55; }
+.explain p b { color: var(--text); font-weight: 600; }
 
 /* pages */
 .nav a { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -262,7 +284,7 @@ dialog::backdrop { background: rgba(0,0,0,.62); }
       <a href="#/bildirimler" data-page="bildirimler">Bildirimler</a>
       <a href="#/gecmis" data-page="gecmis">Geçmiş</a>
     </nav>
-    <div class="side-foot">Emir yalnızca siz <b>ONAY</b> yazınca gider. Tüm risk kontrolleri gönderimden hemen önce yeniden çalışır. Panel yalnızca bu bilgisayardan açılır.</div>
+    <div class="side-foot">Emir yalnızca siz <b>Onayla</b>'ya basınca gider (god mode kapalıyken). Riskler her zaman gösterilir. Panel yalnızca bu bilgisayardan açılır.</div>
   </aside>
 
   <header class="top">
@@ -270,7 +292,7 @@ dialog::backdrop { background: rgba(0,0,0,.62); }
       <span class="dot" id="dot"></span>
       <p id="status-line">Panel verisi yükleniyor…</p>
     </div>
-    <div class="account"><span id="account">-</span><button class="btn small" id="new-btn" type="button">Yeni işlem</button><button class="btn danger small" id="kill-btn" type="button">Acil durdur</button></div>
+    <div class="account"><button class="god-switch" id="god-switch" type="button" role="switch" aria-checked="false" aria-label="God mode"><span class="knob-track"><span class="knob"></span></span>GOD MODE</button><span id="account">-</span><button class="btn small" id="new-btn" type="button">Yeni işlem</button><button class="btn danger small" id="kill-btn" type="button">Acil durdur</button></div>
   </header>
 
   <main>
@@ -279,6 +301,17 @@ dialog::backdrop { background: rgba(0,0,0,.62); }
         <h1>Genel bakış</h1>
         <p id="summary">-</p>
       </div>
+    <section class="card god-card" id="god-card" aria-labelledby="h-god">
+      <div class="card-head"><h2 id="h-god">God mode</h2><span id="god-note">kapalı</span></div>
+      <div class="god-grid">
+        <div><label>Ayrılan sermaye şu an</label><output class="num" id="god-equity">-</output></div>
+        <div><label>Taban (altına inerse kapanır)</label><output class="num" id="god-floor">-</output></div>
+        <div><label>Zirve</label><output class="num" id="god-peak">-</output></div>
+        <div><label>Durum</label><output id="god-status">-</output></div>
+      </div>
+      <p class="queue-empty" id="god-rules"></p>
+    </section>
+
     <section class="card" id="hedef" aria-labelledby="h-goal" hidden>
       <div class="card-head"><h2 id="h-goal">Hedef</h2><span id="goal-note">-</span></div>
       <div class="goal">
@@ -325,7 +358,7 @@ dialog::backdrop { background: rgba(0,0,0,.62); }
     <div class="page" data-page="onay" hidden>
       <div class="title-row">
         <h1>Onay bekleyenler</h1>
-        <p>Ajanın bulduğu ve henüz gönderilmemiş biletler. İnceleyin, düzenleyin, ONAY yazarak gönderin ya da reddedin.</p>
+        <p>Ajanın bulduğu ve henüz gönderilmemiş biletler. İnceleyin, nedenini okuyun, gerekirse düzenleyin; Onayla ile gönderin ya da reddedin.</p>
       </div>
     <section class="card" id="onay" aria-labelledby="h-await">
       <div class="card-head"><h2 id="h-await">Onay bekleyenler</h2><span id="await-note">-</span></div>
@@ -381,6 +414,8 @@ dialog::backdrop { background: rgba(0,0,0,.62); }
           <dl class="facts" id="dlg-facts"></dl>
         </div>
         <ul class="reasons" id="dlg-reasons" hidden></ul>
+        <ul class="warnings" id="dlg-warnings" hidden></ul>
+        <div class="explain" id="dlg-explain" hidden></div>
         <div class="fields" id="dlg-fields" hidden></div>
         <div class="confirm-field" id="dlg-confirm" hidden>
           <label for="dlg-word">Onaylamak için tam olarak ONAY yazın</label>
@@ -637,10 +672,10 @@ function closeFlow(symbol, fraction) {
   const part = fraction >= 1 ? "tamamı" : "yarısı";
   openDialog({
     title: `${symbol} - ${fraction >= 1 ? "pozisyonu kapat" : "yarısını kapat"}`,
-    lead: `Pozisyonun ${part} piyasa emriyle (reduce-only) kapatılır.` + (fraction >= 1 ? " Kalan stop ve hedef emirleri iptal edilir." : " Stop ve hedef kalan miktar için yerinde kalır.") + (p.real_money ? " GERÇEK PARA: ONAY yazın." : ""),
-    facts: positionFacts(p), needWord: p.real_money, okText: fraction >= 1 ? "Kapat" : "Yarısını kapat", okClass: "danger",
-    onOk: async (word) => {
-      const r = await act("/api/close", { symbol, fraction, confirm: word });
+    lead: `Pozisyonun ${part} piyasa emriyle (reduce-only) kapatılır.` + (fraction >= 1 ? " Kalan stop ve hedef emirleri iptal edilir." : " Stop ve hedef kalan miktar için yerinde kalır.") + (p.real_money ? " GERÇEK PARA hesabı." : ""),
+    facts: positionFacts(p), needWord: false, okText: fraction >= 1 ? "Kapat" : "Yarısını kapat", okClass: "danger",
+    onOk: async () => {
+      const r = await act("/api/close", { symbol, fraction });
       refreshVenue();
       return r.ok ? { message: `Kapatma emri gönderildi (${price(r.data.qty)}).`, tone: "good", done: true } : { message: r.data.error, tone: "bad", done: false };
     },
@@ -652,21 +687,21 @@ function protectFlow(symbol) {
   if (!p) return;
   openDialog({
     title: `${symbol} - stop ve hedef`,
-    lead: "Yeni stop/hedef önce borsaya konur, sonra eskisi iptal edilir; pozisyon hiçbir an korumasız kalmaz. Boş bırakılan değiştirilmez." + (p.real_money ? " GERÇEK PARA: ONAY yazın." : ""),
+    lead: "Yeni stop/hedef önce borsaya konur, sonra eskisi iptal edilir; pozisyon hiçbir an korumasız kalmaz. Boş bırakılan değiştirilmez." + (p.real_money ? " GERÇEK PARA hesabı." : ""),
     facts: positionFacts(p),
     fields: [
       { key: "stop", label: "Yeni stop", value: p.stop, hint: p.side === "long" ? "Anlık fiyatın altında" : "Anlık fiyatın üstünde" },
       { key: "take_profit", label: "Yeni hedef", value: p.take_profit, hint: p.side === "long" ? "Anlık fiyatın üstünde" : "Anlık fiyatın altında" },
     ],
-    needWord: p.real_money, okText: "Uygula", okClass: "primary",
-    onOk: async (word) => {
+    needWord: false, okText: "Uygula", okClass: "primary",
+    onOk: async () => {
       const v = fieldValues();
-      const r = await act("/api/protect", { symbol, stop: v.stop, take_profit: v.take_profit, confirm: word });
+      const r = await act("/api/protect", { symbol, stop: v.stop, take_profit: v.take_profit });
       refreshVenue();
       return r.ok ? { message: "Stop/hedef borsada güncellendi.", tone: "good", done: true } : { message: r.data.error, tone: "bad", done: false };
     },
   });
-  if (!p.real_money) $("dlg-ok").disabled = false;
+  $("dlg-ok").disabled = false;
   showChart(symbol, positionLines(p), "15m");
 }
 
@@ -771,6 +806,59 @@ async function showChart(symbol, lines, timeframe) {
   drawCandles($("dlg-svg"), r.ok ? r.data.candles : [], lines);
 }
 
+function renderGod(s) {
+  const g = s.god || {}, st = g.settings || {};
+  const sw = $("god-switch");
+  sw.setAttribute("aria-checked", String(!!g.on));
+  $("god-card").classList.toggle("on", !!g.on);
+  $("god-note").textContent = g.on ? `AÇIK · ${g.account || "-"}${g.real_money ? " · GERÇEK PARA" : ""}` : "kapalı";
+  const equity = s.goal && s.goal.enabled ? s.goal.equity : null;
+  $("god-equity").textContent = equity == null ? "-" : n2.format(equity) + " USDT";
+  $("god-floor").textContent = g.on ? n2.format(g.floor) + " USDT" : "-";
+  $("god-peak").textContent = g.on ? n2.format(g.peak) + " USDT" : "-";
+  $("god-status").textContent = g.on ? (g.target_reached ? "Hedef aşıldı: kâr kilidi" : "Hedefe gidiyor") : (g.stopped_reason ? "Kapandı: " + g.stopped_reason : "Kapalı");
+  $("god-rules").textContent = `Açıkken ajan onay beklemeden işlem açar. Her pozisyonda stop zorunlu; yalnızca ayrılan sermaye kullanılır. `
+    + `Hedefe kadar sermaye %${n2.format(100 - st.brake_pct)}'ine (%${n2.format(st.brake_pct)} kayıp) inerse her şeyi kapatıp durur. `
+    + `Hedeften sonra taban hedefin %${n2.format(st.tolerance_pct)} altından başlar ve zirvenin %${n2.format(st.trail_pct)} altına kadar yükselir; tabana inerse kârı alıp durur.`
+    + (st.stretch_target ? ` Üst hedef ${n2.format(st.stretch_target)} USDT.` : "");
+}
+function godFlow() {
+  const s = lastState || {}, g = s.god || {}, st = g.settings || {}, goal = s.goal || {};
+  if (g.on) {
+    openDialog({
+      title: "God mode'u kapat", lead: "Ajan yeni işlem açmayı bırakır ve tekrar onayınızı bekler. Açık pozisyonlar stop ve hedefleriyle yerinde kalır; isterseniz Pozisyonlar sayfasından kapatabilirsiniz.",
+      facts: [], okText: "Kapat", okClass: "primary",
+      onOk: async () => {
+        const r = await act("/api/god", { on: false });
+        return r.ok ? { message: "God mode kapatıldı.", tone: "good", done: true } : { message: r.data.error, tone: "bad", done: false };
+      },
+    });
+    return;
+  }
+  const real = s.account && s.account.real_money;
+  openDialog({
+    title: real ? "God mode - GERÇEK PARA" : "God mode",
+    lead: (real ? "DİKKAT: Ajan GERÇEK PARANIZLA onay beklemeden işlem açacak. " : "Ajan demo hesapta onay beklemeden işlem açacak. ")
+      + "Riskler gösterilir ama engel olmaz; yalnızca aşağıdaki korumalar çalışır.",
+    facts: [
+      ["Ayrılan sermaye", goal.enabled ? n2.format(goal.start_capital) + " USDT" : "YOK (config.yaml → goal.start_capital)"],
+      ["Hedef", goal.enabled ? n2.format(goal.target) + " USDT" : "-"],
+      ["Stop", "her pozisyonda zorunlu"],
+      ["İflas freni", `%${n2.format(st.brake_pct)} kayıpta her şeyi kapatıp durur (${goal.enabled ? n2.format(goal.start_capital * (1 - st.brake_pct / 100)) : "-"} USDT)`],
+      ["Kâr kilidi", `hedeften sonra taban: hedef −%${n2.format(st.tolerance_pct)}, sonra zirve −%${n2.format(st.trail_pct)}; hiç inmez`],
+      ["Üst hedef", st.stretch_target ? n2.format(st.stretch_target) + " USDT" : "yok"],
+      ["Hesap", s.account ? s.account.label : "-"],
+    ],
+    okText: "Kuralları anladım, god mode'u aç", okClass: real ? "danger" : "primary",
+    onOk: async () => {
+      const r = await act("/api/god", { on: true, accept: true });
+      return r.ok ? { message: "God mode açık. Ajan uygun fırsatları kendi açacak; her adım Telegram'a gelir.", tone: "good", done: true }
+        : { message: r.data.error, tone: "bad", done: false };
+    },
+  });
+}
+$("god-switch").addEventListener("click", godFlow);
+
 function renderGoal(s) {
   const g = s.goal || {};
   const card = $("hedef");
@@ -869,8 +957,18 @@ function fieldValues() {
   return out;
 }
 let dlgAlt = null;
-function openDialog({ title, lead, facts, reasons, needWord, okText, okClass, onOk, fields, altText, onAlt }) {
+function openDialog({ title, lead, facts, reasons, needWord, okText, okClass, onOk, fields, altText, onAlt, warnings, explanation }) {
   renderFields(fields);
+  const wl = $("dlg-warnings"); wl.textContent = "";
+  wl.hidden = !(warnings && warnings.length);
+  if (warnings && warnings.length) wl.append(el("li", { text: "Uyarılar (göndermeyi engellemez, kararı siz verirsiniz):" }));
+  for (const w of warnings || []) wl.append(el("li", { text: w }));
+  const ex = $("dlg-explain"); ex.textContent = "";
+  ex.hidden = !(explanation && explanation.length);
+  if (explanation && explanation.length) {
+    ex.append(el("h3", { text: "Neden bu işlem?" }));
+    for (const [head, body] of explanation) ex.append(el("p", {}, el("b", { text: head + ": " }), body));
+  }
   $("dlg-chart").hidden = true;
   const alt = $("dlg-alt");
   alt.hidden = !onAlt; alt.textContent = altText || ""; alt.disabled = false;
@@ -949,6 +1047,8 @@ function showPreview(data) {
       ["Bilet", id],
     ],
     reasons: data.reasons,
+    warnings: data.warnings,
+    explanation: data.explanation,
     fields: [
       { key: "entry", label: "Giriş (limit)", value: t.entry },
       { key: "stop", label: "Stop", value: t.stop },
@@ -961,11 +1061,11 @@ function showPreview(data) {
       const r = await act("/api/modify", { ticket_id: id, ...v });
       if (!r.ok) { showResult(r.data.error || "Güncellenemedi", "bad"); return; }
       showPreview(r.data);
-      showResult("Bilet güncellendi; yeni değerler yukarıda. Göndermek için ONAY yazın.", "good");
+      showResult("Bilet güncellendi; yeni değerler yukarıda. Göndermek için Onayla'ya basın.", "good");
     },
-    needWord: true, okText: "Emri gönder", okClass: a.real_money ? "danger" : "primary",
-    onOk: async (word) => {
-      const r = await act("/api/execute", { ticket_id: id, confirm: word });
+    needWord: false, okText: a.real_money ? "Onayla ve gönder (gerçek para)" : "Onayla ve gönder", okClass: a.real_money ? "danger" : "primary",
+    onOk: async () => {
+      const r = await act("/api/execute", { ticket_id: id });
       if (r.ok) return { message: "Emir gönderildi: giriş, stop ve hedef borsada. " + (r.data.lines || []).join(" "), tone: "good", done: true };
       const extra = (r.data.reasons || []).join(" · ");
       return { message: (r.data.error || "Gönderilemedi") + (extra ? " " + extra : ""), tone: "bad", done: r.status === 409 };
@@ -988,7 +1088,7 @@ function newTradeFlow(prefill) {
   const p = prefill || {};
   openDialog({
     title: "Yeni işlem",
-    lead: "Kendi long/short işleminizi tanımlayın. Önizlemede miktar, kaldıraç, risk ve likidasyon hesaplanır; emir yalnızca ONAY yazınca gider.",
+    lead: "Kendi long/short işleminizi tanımlayın. Önizlemede miktar, kaldıraç, risk ve likidasyon hesaplanır; emir yalnızca Onayla'ya basınca gider.",
     facts: [],
     fields: [
       { key: "symbol", label: "Sembol", value: p.symbol || "", placeholder: "BTC/USDT:USDT", type: "text", wide: true,
@@ -1014,7 +1114,7 @@ function newTradeFlow(prefill) {
       const r = await act("/api/manual", v);
       if (!r.ok) return { message: r.data.error || "Bilet oluşturulamadı", tone: "bad", done: false };
       showPreview(r.data);
-      return { message: "Bilet oluşturuldu. Değerleri kontrol edip göndermek için ONAY yazın.", tone: "", done: false, keep: true };
+      return { message: "Bilet oluşturuldu. Değerleri ve açıklamayı kontrol edip Onayla'ya basın.", tone: "", done: false, keep: true };
     },
   });
 }
@@ -1045,9 +1145,9 @@ function killFlow() {
   const label = lastState ? lastState.account.label : "";
   openDialog({
     title: "Acil durdur", lead: `Hesap: ${label}. Tüm açık pozisyonlar piyasa emriyle kapatılır, kapandığı doğrulanan sembollerin emirleri iptal edilir.`,
-    facts: [], needWord: true, okText: "Hepsini kapat", okClass: "danger",
-    onOk: async (word) => {
-      const r = await act("/api/kill", { confirm: word });
+    facts: [], needWord: false, okText: "Hepsini kapat", okClass: "danger",
+    onOk: async () => {
+      const r = await act("/api/kill", {});
       if (!r.ok) return { message: r.data.error, tone: "bad", done: false };
       const p = r.data.problems || [];
       return p.length ? { message: "Tamamlanamadı: " + p.join(" · "), tone: "bad", done: true } : { message: "Pozisyonlar kapatıldı, emirler iptal edildi.", tone: "good", done: true };
@@ -1096,7 +1196,7 @@ async function refresh() {
   }
   try {
     lastState = s;
-    renderStatus(s); renderGoal(s); renderKpis(s); renderRisk(s);
+    renderStatus(s); renderGod(s); renderGoal(s); renderKpis(s); renderRisk(s);
     if (changed("await", [s.awaiting, s.account, (s.watch || {}).mode])) renderAwaiting(s);
     setCount("c-onay", (s.awaiting || []).length, true);
     if (changed("curve", s.r_curve)) renderCurve(s);

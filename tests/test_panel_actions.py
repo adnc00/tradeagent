@@ -98,13 +98,12 @@ def test_preview_shows_the_ticket_as_it_would_be_sent(server, config_path):
     assert ticket_status(config_path, ticket_id) == "new"
 
 
-@pytest.mark.parametrize("word", ["", "onay", "ONAY ", "evet"])
-def test_execute_needs_the_exact_confirmation_word(server, config_path, word):
+def test_execute_is_a_single_click(server, config_path):
+    # The user decided (2026-11-26): the panel's Approve button sends; no typed word.
     ticket_id = scanned_ticket_id(config_path)
-    code, body = post(server, "/api/execute", {"ticket_id": ticket_id, "confirm": word})
-    assert code == 400 and "ONAY" in body["error"]
-    assert ticket_status(config_path, ticket_id) == "new"
-    assert PaperBroker(load_config(config_path).paper_state_path).brackets == []
+    code, body = post(server, "/api/execute", {"ticket_id": ticket_id})
+    assert code == 200 and body["status"] == "sent"
+    assert ticket_status(config_path, ticket_id) == "submitted"
 
 
 def test_execute_with_onay_sends_the_bracket(server, config_path):
@@ -155,16 +154,14 @@ def test_cancel_removes_an_unfilled_entry(server, config_path):
     assert ticket_status(config_path, ticket_id) == "canceled"
 
 
-def test_kill_needs_onay_and_then_closes_everything(server, config_path):
+def test_kill_closes_everything_on_click(server, config_path):
     ticket_id = scanned_ticket_id(config_path)
-    post(server, "/api/execute", {"ticket_id": ticket_id, "confirm": "ONAY"})
+    post(server, "/api/execute", {"ticket_id": ticket_id})
     broker = PaperBroker(load_config(config_path).paper_state_path)
     for candle in follow_through_candles()[:2]:
         broker.feed_candle("BTC/USDT", candle)
     assert len(broker.get_positions()) == 1
-    assert post(server, "/api/kill", {"confirm": "evet"})[0] == 400
-    assert len(PaperBroker(load_config(config_path).paper_state_path).get_positions()) == 1
-    code, body = post(server, "/api/kill", {"confirm": "ONAY"})
+    code, body = post(server, "/api/kill", {})
     assert code == 200 and body["problems"] == []
     assert PaperBroker(load_config(config_path).paper_state_path).get_positions() == []
 
@@ -258,11 +255,12 @@ def test_modify_refuses_inconsistent_levels(server, config_path, levels):
     assert code == 400 and body["error"]
 
 
-def test_modify_refuses_risk_above_the_cap(server, config_path):
+def test_modify_allows_risk_above_the_cap_but_warns(server, config_path):
     ticket_id = scanned_ticket_id(config_path)
     code, body = post(server, "/api/modify", {"ticket_id": ticket_id, "entry": 100.5, "stop": 99.2, "target": 104.5,
-                                              "risk_pct": 50})
-    assert code == 400 and "risk" in body["error"].lower()
+                                              "risk_pct": 3})
+    assert code == 200 and body["reasons"] == []
+    assert any("risk" in w.lower() for w in body["warnings"])
 
 
 # --- open your own long/short --------------------------------------------------------------------------
@@ -290,10 +288,11 @@ def test_manual_short_on_spot_is_refused_by_the_risk_engine(server):
     assert code == 200 and any("spot" in r.lower() or "short" in r.lower() for r in body["reasons"])
 
 
-def test_manual_trade_needs_an_allowed_symbol(server):
+def test_manual_trade_outside_the_allowlist_is_a_warning(server):
     code, body = post(server, "/api/manual", {"symbol": "DOGE/USDT", "side": "long", "entry": 1.0, "stop": 0.9,
                                               "target": 1.5, "risk_pct": 0.5})
-    assert code == 200 and any("izin" in r for r in body["reasons"])
+    assert code == 200 and body["reasons"] == []
+    assert any("izin" in w for w in body["warnings"])
 
 
 def test_queue_says_why_a_ticket_was_not_sent_automatically(config_path):
@@ -307,3 +306,30 @@ def test_queue_says_why_a_ticket_was_not_sent_automatically(config_path):
     (ticket,) = panel.build_state(cfg)["awaiting"]
     assert "zaten açık pozisyon" in ticket["why"]
     assert not ticket["why"][:4].isdigit()  # no timestamp
+
+
+
+# --- risk is shown, not imposed, on the user's own trades ------------------------------------------------
+
+
+def test_user_trade_below_min_rr_is_a_warning_and_still_sends(server, config_path):
+    code, body = post(server, "/api/manual", {"symbol": "BTC/USDT", "side": "long", "entry": 100.9, "stop": 99.9,
+                                              "target": 101.5, "risk_pct": 0.5})
+    assert code == 200 and body["reasons"] == []
+    assert any("R:R" in w for w in body["warnings"])
+    code, sent = post(server, "/api/execute", {"ticket_id": body["ticket"]["id"]})
+    assert code == 200 and sent["status"] == "sent"
+
+
+def test_a_broken_setup_is_still_blocked(server, config_path, monkeypatch):
+    ticket_id = scanned_ticket_id(config_path)
+    monkeypatch.setattr(StubMarketData, "price", 99.0)  # price already through the stop
+    code, body = post(server, "/api/execute", {"ticket_id": ticket_id})
+    assert code == 409 and any("stop" in r for r in body["reasons"])
+
+
+def test_preview_explains_the_trade_for_a_beginner(server, config_path):
+    ticket_id = scanned_ticket_id(config_path)
+    code, body = post(server, "/api/preview", {"ticket_id": ticket_id})
+    titles = [title for title, _ in body["explanation"]]
+    assert any("Genel yön" in t for t in titles) and any("Stop" in t for t in titles)

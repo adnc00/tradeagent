@@ -15,6 +15,7 @@ from typing import Any
 
 import yaml
 
+from tradeagent.god import GodConfig
 from tradeagent.models import RiskLimits
 from tradeagent.risk import MAX_FEE_RATE
 from tradeagent.scanner import ScannerParams
@@ -140,6 +141,7 @@ class Config:
     execution: ExecutionConfig = field(default_factory=ExecutionConfig)
     universe: UniverseConfig = field(default_factory=UniverseConfig)
     goal: GoalConfig = field(default_factory=GoalConfig)
+    god: GodConfig = field(default_factory=GodConfig)
     source: Path | None = None
 
     @property
@@ -160,6 +162,7 @@ _SECTIONS: dict[str, type] = {
     "execution": ExecutionConfig,
     "universe": UniverseConfig,
     "goal": GoalConfig,
+    "god": GodConfig,
 }
 
 

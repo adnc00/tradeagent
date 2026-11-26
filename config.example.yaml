@@ -84,3 +84,10 @@ goal:
   start_capital: 0
   target: 1000
   since: ''
+
+# God mode (paneldeki anahtarla açılır; burada yalnızca korumaların ayarları var).
+god:
+  brake_pct: 50                  # hedefe kadar: ayrılan sermaye bu % kadar düşerse her şeyi kapatıp durur
+  post_target_tolerance_pct: 10  # hedefe ulaşınca taban: hedefin bu % altı (1000 -> 900)
+  trail_pct: 12                  # sonra taban zirvenin bu % altına kadar yükselir, hiç inmez (1700 -> ~1500)
+  stretch_target: 0              # üst hedef (USDT); ulaşınca kârı alıp durur (0 = yok)

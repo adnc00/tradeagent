@@ -2,6 +2,16 @@
 
 Biçim [Keep a Changelog](https://keepachangelog.com/tr-TR/1.1.0/), sürümler [SemVer](https://semver.org/lang/tr/).
 
+## [0.11.0] - 2026-11-26
+
+### Eklendi
+- **God mode** (panelin üstündeki anahtar): açıkken ajan onay beklemeden işlem açar (demo ve gerçek para). Korumalar: stop zorunlu, yalnızca ayrılan sermaye, hedefe kadar iflas freni (`god.brake_pct` %50), hedeften sonra yükselen kâr kilidi (`god.post_target_tolerance_pct` %10, `god.trail_pct` %12), isteğe bağlı üst hedef (`god.stretch_target`). Tabana inilince tüm pozisyonlar kapatılır, god mode kapanır ve Telegram'a bildirilir. Genel bakış'ta God mode kartı.
+- **Neden bu işlem?**: her bilet için yeni başlayanlara adım adım açıklama (trend, likidite süpürmesi, MSS, FVG girişi, stop ve hedefin nedeni, R, riskler); onay penceresinde ve Telegram'da.
+
+### Değişti
+- Panelde onay tek tıklama (`ONAY` yazmak yok); kapat, stop/hedef ve acil durdur da tıklamayla.
+- Panelden onaylanan/elle açılan işlemlerde risk kuralları uyarıdır, engellemez; yalnızca sert kurallar (stop yok/yanlış tarafta, fiyat stop'u geçmiş, spot short, geçersiz değerler, borsa minimumları) engeller.
+
 ## [0.10.0] - 2026-11-26
 
 ### Değişti

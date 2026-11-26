@@ -88,6 +88,12 @@ def _ticket(row: sqlite3.Row) -> dict[str, Any]:
     return item
 
 
+def _god_state(cfg: Config) -> dict[str, Any]:
+    from tradeagent import god
+
+    return god.load(cfg).as_dict()
+
+
 def _goal_state(cfg: Config, path: Path, live: bool) -> dict[str, Any]:
     goal = cfg.goal
     if not goal.enabled:
@@ -276,6 +282,9 @@ def build_state(cfg: Config, now: datetime | None = None, *, live: bool = False)
         },
         "risk": risk,
         "goal": _goal_state(cfg, cfg.journal_path, remote),
+        "god": {**_god_state(cfg), "settings": {"brake_pct": cfg.god.brake_pct,
+                "tolerance_pct": cfg.god.post_target_tolerance_pct, "trail_pct": cfg.god.trail_pct,
+                "stretch_target": cfg.god.stretch_target}},
         "account": account_info(cfg, live),
         "awaiting": [t for t in journal["new_tickets"] if not t["expired"]],
         "open_tickets": journal["open_tickets"],

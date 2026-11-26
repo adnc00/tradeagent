@@ -101,6 +101,7 @@ def ticket_alert(
     valid_minutes: int,
     action: str,
     headline: str = "yeni kurulum",
+    explanation: list[tuple[str, str]] | None = None,
 ) -> Alert:
     """Plain-text alert with levels, size, risk, gain at target and the next step."""
     metrics = ticket_metrics(ticket, equity, mmr)
@@ -131,7 +132,12 @@ def ticket_alert(
         lines.append(f"Başabaş kazanma oranı: %{break_even:.1f} (bu R:R ile en az bu kadar işlem kazanmalı)")
     lines.append(_expectation_line(stats, metrics.risk_amount, currency))
     lines.append(f"Özsermaye: {money(equity)} {currency}")
-    if narrative:
+    if explanation:
+        lines.append("")
+        lines.append("Neden bu işlem?")
+        lines.extend(f"{title}: {text}" for title, text in explanation)
+        lines.append("")
+    elif narrative:
         lines.append(f"Neden: {narrative}")
     lines.append(f"Killzone: {killzone or '-'}")
     if ticket.created_at is not None:

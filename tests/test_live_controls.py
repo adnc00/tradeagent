@@ -233,15 +233,13 @@ def test_positions_action_lists_venue_positions_with_their_protection(config_pat
     assert p["unrealized_pnl"] == 2.0 and p["leverage"] == 10.0
 
 
-def test_close_action_on_demo_needs_no_word_but_real_money_does(config_path, monkeypatch):
+def test_close_action_is_a_click_on_any_account(config_path, monkeypatch):
     stub = AccountStub()
     monkeypatch.setattr(actions, "_account_brokers", lambda cfg, live: [stub])
     cfg = load_config(config_path)
     assert actions.close(cfg, True, {"symbol": SYMBOL, "fraction": 0.5})["status"] == "closed"
     stub.is_demo = False
-    with pytest.raises(actions.ActionError):
-        actions.close(cfg, True, {"symbol": SYMBOL, "fraction": 1.0})
-    assert actions.close(cfg, True, {"symbol": SYMBOL, "fraction": 1.0, "confirm": "ONAY"})["status"] == "closed"
+    assert actions.close(cfg, True, {"symbol": SYMBOL, "fraction": 1.0})["status"] == "closed"
     assert stub.closed == [(SYMBOL, 0.5), (SYMBOL, 1.0)]
 
 

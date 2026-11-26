@@ -31,7 +31,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from tradeagent import notify, panel, universe
+from tradeagent import god, notify, panel, universe
+from tradeagent.explain import explain
 from tradeagent.brokers.base import Broker, BrokerError, OrderResult, OrderStateUnknown
 from tradeagent.brokers.data import DERIVATIVE_EXCHANGES, MarketData, asset_class, market_type
 from tradeagent.brokers.paper import PaperBroker
@@ -346,9 +347,11 @@ def current_price(broker: Broker, cfg: Config, symbol: str) -> float | None:
         return None
 
 
-def stale_reasons(ticket: OrderTicket, price: float | None, cfg: Config, now: datetime) -> list[str]:
-    """Why a ticket is too old or the market has moved away from it."""
-    reasons = []
+def stale_split(ticket: OrderTicket, price: float | None, cfg: Config, now: datetime) -> tuple[list[str], list[str]]:
+    """(hard, soft): hard = the order itself would be broken (price already through the stop);
+    soft = the ticket may be stale (target reached, moved past entry, old, price unknown)."""
+    hard: list[str] = []
+    reasons: list[str] = []
     limits = cfg.execution
     if price is None:
         reasons.append("Güncel fiyat alınamadı; bayat bilet kontrolü yapılamadığından emir gönderilmez.")
@@ -356,7 +359,7 @@ def stale_reasons(ticket: OrderTicket, price: float | None, cfg: Config, now: da
         sign = ticket.side.sign
         target = ticket.take_profit
         if ticket.stop is not None and (price - ticket.stop) * sign <= 0:
-            reasons.append(f"Fiyat ({num(price)}) stop seviyesini ({num(ticket.stop)}) zaten geçmiş; kurulum bozuldu.")
+            hard.append(f"Fiyat ({num(price)}) stop seviyesini ({num(ticket.stop)}) zaten geçmiş; kurulum bozuldu.")
         elif target is not None and (price - target) * sign >= 0:
             reasons.append(f"Fiyat ({num(price)}) hedef 1'e ({num(target)}) zaten ulaşmış; fırsat kaçtı.")
         else:
@@ -375,7 +378,21 @@ def stale_reasons(ticket: OrderTicket, price: float | None, cfg: Config, now: da
         reasons.append(
             f"Bilet çok eski (yaş {age}, sınır {limits.ticket_max_age_minutes} dk); yeniden tarayın."
         )
-    return reasons
+    return hard, reasons
+
+
+def stale_reasons(ticket: OrderTicket, price: float | None, cfg: Config, now: datetime) -> list[str]:
+    """Why a ticket is too old or the market has moved away from it (hard and soft together)."""
+    hard, soft = stale_split(ticket, price, cfg, now)
+    return hard + soft
+
+
+# Rules that make an order impossible or nonsensical: they block even the user's own trade.
+# Every other risk rule is the user's to weigh; on a user-approved trade it is shown as a warning.
+HARD_RULES = frozenset({
+    "invalid_price", "missing_stop", "stop_wrong_side", "missing_target", "invalid_qty", "invalid_fee",
+    "invalid_leverage", "leverage_not_supported", "short_not_supported", "no_equity",
+})
 
 
 def prepare_ticket(
@@ -400,14 +417,42 @@ def prepare_ticket(
     return prepared, state, reasons
 
 
+def prepare_user_ticket(
+    ticket: OrderTicket, broker: Broker, journal: Journal, cfg: Config, *, quick: bool = True
+) -> tuple[OrderTicket, AccountState, list[str], list[str]]:
+    """Like ``prepare_ticket`` for a trade the user approves: (prepared, state, blocking, warnings).
+    Only the hard rules and the venue's own requirements block; every other risk rule is a warning."""
+    state = account_state(broker, journal, goal=cfg.goal, quick=quick)
+    try:
+        prepared = replace(ticket, market=broker.market_type(ticket.symbol, ticket.market))
+        if prepared.stop is not None and prepared.targets:
+            entry, stop, targets = broker.normalize_prices(
+                prepared.symbol, prepared.side, prepared.entry, prepared.stop, prepared.targets
+            )
+            prepared = replace(prepared, entry=entry, stop=stop, targets=targets)
+    except BrokerError as exc:
+        return ticket, state, [str(exc)], []
+    prepared = resize_for_account(prepared, state.equity, broker, cfg.risk)
+    violations = check_ticket(prepared, state, cfg.risk)
+    blocking = [v.message for v in violations if v.code in HARD_RULES]
+    warnings = [v.message for v in violations if v.code not in HARD_RULES]
+    if not blocking:
+        blocking.extend(broker.venue_problems(prepared))
+    hard, soft = stale_split(prepared, current_price(broker, cfg, prepared.symbol), cfg, datetime.now(UTC))
+    return prepared, state, blocking + hard, warnings + soft
+
+
 def recheck_after_confirmation(
-    ticket: OrderTicket, broker: Broker, journal: Journal, cfg: Config, *, quick: bool = False
+    ticket: OrderTicket, broker: Broker, journal: Journal, cfg: Config, *, quick: bool = False, user: bool = False
 ) -> list[str]:
-    """Risk engine and stale-ticket guard on exactly the confirmed ticket, with fresh account state."""
+    """Risk engine and stale-ticket guard on exactly the confirmed ticket, with fresh account state.
+    For a ``user`` trade only the hard rules and a price already through the stop block."""
     state = account_state(broker, journal, exclude=ticket.id, goal=cfg.goal, quick=quick)
-    reasons = [v.message for v in check_ticket(ticket, state, cfg.risk)]
-    reasons.extend(stale_reasons(ticket, current_price(broker, cfg, ticket.symbol), cfg, datetime.now(UTC)))
-    return reasons
+    violations = check_ticket(ticket, state, cfg.risk)
+    hard, soft = stale_split(ticket, current_price(broker, cfg, ticket.symbol), cfg, datetime.now(UTC))
+    if user:
+        return [v.message for v in violations if v.code in HARD_RULES] + hard
+    return [v.message for v in violations] + hard + soft
 
 
 # --- rendering -----------------------------------------------------------------------------------------------
@@ -661,14 +706,15 @@ class SendOutcome:
 
 
 def send_confirmed(
-    prepared: OrderTicket, broker: Broker, journal: Journal, cfg: Config, mode: str, *, quick: bool = False
+    prepared: OrderTicket, broker: Broker, journal: Journal, cfg: Config, mode: str, *, quick: bool = False,
+    user: bool = False,
 ) -> SendOutcome:
     """Claim, re-check and send an already approved ticket. Never asks for anything."""
     if not journal.claim_for_submission(prepared.id, broker=broker.name, mode=mode):
         return SendOutcome(
             "busy", EXIT_ABORTED, ["Bilet başka bir işlem tarafından gönderiliyor ya da gönderildi. Emir GÖNDERİLMEDİ."]
         )
-    reasons = recheck_after_confirmation(prepared, broker, journal, cfg, quick=quick)
+    reasons = recheck_after_confirmation(prepared, broker, journal, cfg, quick=quick, user=user)
     if reasons:
         journal.release_claim(prepared.id, "onay sonrası kontrol reddetti: " + " | ".join(reasons))
         return SendOutcome(
@@ -963,8 +1009,25 @@ def auto_problems(cfg: Config, symbols: list[str], live_flag: bool) -> list[str]
     return problems
 
 
-def submit_unattended(ticket_id: str, broker: Broker, journal: Journal, cfg: Config, mode: str = "paper") -> SendOutcome:
-    """Send a ticket without asking: only ever on a demo/paper broker, with every risk and stale check."""
+def submit_unattended(
+    ticket_id: str, broker: Broker, journal: Journal, cfg: Config, mode: str = "paper", *, god_mode: bool = False
+) -> SendOutcome:
+    """Send a ticket without asking. Without god mode: only on a demo/paper broker, with every risk and
+    stale check. In god mode (switched on in the panel): on any account, with the hard rules only."""
+    if god_mode:
+        ticket = journal.get_ticket(ticket_id)
+        if ticket is None or ticket.status != "new":
+            return SendOutcome("refused", EXIT_ABORTED, [f"Bilet {ticket_id} gönderilebilir durumda değil."])
+        prepared, state, reasons, warnings = prepare_user_ticket(ticket, broker, journal, cfg, quick=True)
+        if reasons:
+            journal.add_ticket_note(ticket.id, "god mode gönderim reddi: " + " | ".join(reasons))
+            return SendOutcome("rejected", EXIT_REJECTED, ["God mode gönderemedi:", *(f"  - {r}" for r in reasons)],
+                               ticket=prepared, equity=state.equity)
+        journal.add_ticket_note(ticket.id, f"god mode: onaysız gönderim ({broker.name}, {broker.environment})"
+                                + (f"; göz ardı edilen uyarılar: {' | '.join(warnings)}" if warnings else ""))
+        outcome = send_confirmed(prepared, broker, journal, cfg, mode, quick=True, user=True)
+        outcome.equity = state.equity
+        return outcome
     if not getattr(broker, "is_demo", False):
         return SendOutcome(
             "refused",
@@ -1046,6 +1109,45 @@ def mark_filled(broker: Broker, journal: Journal) -> None:
             journal.set_ticket_status(ticket.id, "open", note="giriş doldu (borsada pozisyon var)")
 
 
+_GOD_STOP_TR = {
+    "brake": "iflas freni: ayrılan sermaye tabanın altına düştü",
+    "lock": "kâr kilidi: hedeften sonra kâr tabanına geri düşüldü",
+    "stretch": "üst hedefe ulaşıldı",
+}
+
+
+def god_equity(cfg: Config, broker: Broker, journal: Journal) -> float:
+    """Allocated equity: start capital + net P&L closed since the start + open positions' P&L."""
+    goal = cfg.goal
+    realized = journal.realized_pnl(broker.name, goal.since_moment())
+    unrealized = sum(float(p.unrealized_pnl or 0.0) for p in broker.get_positions())
+    return goal.start_capital + realized + unrealized
+
+
+def god_check(cfg: Config, broker: Broker, journal: Journal, channels: list) -> str | None:
+    """Move the floor; at the floor (or the stretch target) close everything and switch god mode off."""
+    state = god.load(cfg)
+    if not state.on or (state.account and state.account != broker.name):
+        return None
+    equity = god_equity(cfg, broker, journal)
+    state = god.update(state, equity, cfg.god)
+    decision = god.verdict(state, equity, cfg.god)
+    if decision is None:
+        god.save(cfg, state)
+        return None
+    problems = _kill_broker(broker, journal, not getattr(broker, "is_demo", False))
+    reason = _GOD_STOP_TR[decision]
+    god.save(cfg, replace(state, on=False, stopped_reason=reason))
+    body = (
+        f"Neden: {reason}.\nSermaye: {money(equity)} USDT (taban {money(state.floor)}, zirve {money(state.peak)}).\n"
+        "Tüm pozisyonlar kapatıldı, emirler iptal edildi; ajan artık onay bekleyecek."
+    )
+    if problems:
+        body += "\nDİKKAT, tamamlanamayanlar: " + " | ".join(problems)
+    _send(channels, notify.Alert(f"God mode kapandı - {reason}", body))
+    return decision
+
+
 def _last_note(text: str | None) -> str:
     lines = [line for line in (text or "").splitlines() if line.strip()]
     if not lines:
@@ -1122,6 +1224,7 @@ def watch_cycle(args: argparse.Namespace, cfg: Config, journal: Journal, channel
         refresh(broker, journal)
         mark_filled(broker, journal)
         record_equity(broker, journal, cfg.goal)
+        god_check(cfg, broker, journal, channels)
         cleaner = getattr(broker, "cancel_orphans", None)
         if cleaner is not None:
             try:
@@ -1132,6 +1235,8 @@ def watch_cycle(args: argparse.Namespace, cfg: Config, journal: Journal, channel
         for ticket_id in backfill_results(broker, journal):
             print(f"  [{ticket_id}] sonuç borsa işlemlerinden kaydedildi")
     brokers.setdefault("paper", paper_broker(cfg))
+    if not live:
+        god_check(cfg, brokers["paper"], journal, channels)
     market = MarketData(cfg.crypto.exchange)
     now = datetime.now(UTC)
     for broker in brokers.values():
@@ -1150,11 +1255,16 @@ def watch_cycle(args: argparse.Namespace, cfg: Config, journal: Journal, channel
             mmr=cfg.risk.mmr,
             stats=stats,
             narrative=setup.narrative,
+            explanation=explain(current, setup),
             killzone=setup.killzone,
             valid_minutes=cfg.execution.ticket_max_age_minutes,
         )
-        if args.demo_auto:
-            outcome = submit_unattended(current.id, broker, journal, cfg, "live" if live_for(current.symbol) else "paper")
+        god_state = god.load(cfg)
+        god_on = god_state.on and (god_state.account in (None, broker.name))
+        if args.demo_auto or god_on:
+            outcome = submit_unattended(
+                current.id, broker, journal, cfg, "live" if live_for(current.symbol) else "paper", god_mode=god_on
+            )
             if outcome.status == "rejected":
                 for line in outcome.lines:
                     print(line)
@@ -1170,7 +1280,7 @@ def watch_cycle(args: argparse.Namespace, cfg: Config, journal: Journal, channel
                 alert = notify.ticket_alert(
                     outcome.ticket,
                     equity=outcome.equity or 0.0,
-                    headline="demo hesapta otomatik gönderildi",
+                    headline="god mode: otomatik gönderildi" if god_on else "demo hesapta otomatik gönderildi",
                     action="\n".join(
                         [f"Hesap: {broker.name} ({broker.environment})", "Gönderilen emirler:", *_order_lines(outcome.orders),
                          f"Giriş {cfg.execution.entry_expiry_minutes} dk içinde dolmazsa ya da fiyat önce hedefe giderse emir iptal edilir.",

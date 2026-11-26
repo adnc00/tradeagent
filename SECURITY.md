@@ -9,8 +9,8 @@
 
 ## Emir güvenliği
 
-- Gerçek para emri yalnızca kullanıcı tam olarak `ONAY` yazınca gider: etkileşimli terminalde (TTY) ya da yerel panelin onay penceresinde. Terminalde betik veya boru onay veremez. Panel 127.0.0.1'e bağlanır; işlemler sayfaya gömülü gizli anahtar (her panel açılışında yeni), panelin kendi Origin'i ve JSON gövde olmadan reddedilir. Bilgisayarınızda çalışan kötü amaçlı bir program yine de yerel paneli kullanabilir; bilgisayarınızı güvende tutun ve gerçek para hesabında paneli yalnızca kullanırken açık tutun.
-- Onaysız gönderim yalnızca `watch --demo-auto` ile ve yalnızca demo/paper hesaplarda mümkündür. Bu sınırı gevşeten bir değişiklik, `tests/test_cli.py` ve `tests/test_watch.py` içindeki güvenlik testlerini kırmalıdır.
+- God mode kapalıyken gerçek para emri yalnızca kullanıcının onayıyla gider: terminalde (TTY) `ONAY` yazarak ya da yerel panelde önizlemeyi görüp **Onayla**'ya basarak. God mode açıkken ajan onay beklemez; god mode yalnızca panelden, kuralları onaylayarak açılır ve korumaları (stop, ayrılan sermaye, iflas freni, kâr kilidi) kaldırılamaz. Terminalde betik veya boru onay veremez. Panel 127.0.0.1'e bağlanır; işlemler sayfaya gömülü gizli anahtar (her panel açılışında yeni), panelin kendi Origin'i ve JSON gövde olmadan reddedilir. Bilgisayarınızda çalışan kötü amaçlı bir program yine de yerel paneli kullanabilir; bilgisayarınızı güvende tutun ve gerçek para hesabında paneli yalnızca kullanırken açık tutun.
+- Onaysız gönderim iki yoldan olur: `watch --demo-auto` (yalnızca demo/paper) ve panelden açılan god mode. Bu sınırı gevşeten bir değişiklik, `tests/test_cli.py` ve `tests/test_watch.py` içindeki güvenlik testlerini kırmalıdır.
 - Bildirim kanalları yalnızca **gönderir**; Telegram'dan gelen mesajlar hiçbir işlem başlatmaz.
 
 ## Açık bildirme

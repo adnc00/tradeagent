@@ -1,11 +1,11 @@
-"""Panel actions: approve, cancel, dismiss and kill through the local panel.
+"""Panel actions: approve, edit, open, cancel, close, protect and kill through the local panel.
 
-They run exactly the terminal's path: the ticket is venue-rounded and re-sized,
-the risk engine and the stale-ticket guard run, the ticket is claimed atomically
-and both checks run once more on what will be sent. Sending and the kill need
-the same confirmation word as the terminal (``ONAY``), typed by the user in the
-panel. Cancelling an unfilled entry and dismissing an unsent ticket only reduce
-risk and need no word. Nothing here runs without a request from the panel page.
+The user decides (2026-11-26): a click on the panel's button is the approval, on demo
+and on real money; every risk rule is shown, and only rules that make an order
+impossible or nonsensical block (``cli.HARD_RULES``, a price already through the
+stop, the venue's own minimums). The ticket is still venue-rounded, re-sized,
+claimed atomically and re-checked right before it is sent. Nothing here runs
+without a request from the panel page (token + Origin + JSON, see ``panel``).
 """
 
 import math
@@ -17,6 +17,7 @@ from typing import Any
 
 from tradeagent import cli
 from tradeagent.brokers.data import market_type
+from tradeagent.explain import explain
 from tradeagent.journal import USER_PREFIX, Journal
 from tradeagent.models import OrderTicket
 from tradeagent.risk import ticket_metrics
@@ -54,10 +55,6 @@ def _orders(orders) -> list[dict[str, Any]]:
         for o in orders
     ]
 
-
-def _require_confirmation(confirm: object) -> None:
-    if confirm != cli.CONFIRM_WORD:
-        raise ActionError(400, f"Onay için tam olarak {cli.CONFIRM_WORD} yazın; hiçbir işlem yapılmadı.")
 
 
 def _load(journal: Journal, ticket_id: object, *, status: str) -> OrderTicket:
@@ -97,11 +94,20 @@ def _account_brokers(cfg, live: bool) -> list:
 
 def _prepared(cfg, live: bool, journal: Journal, ticket: OrderTicket):
     broker = _broker(cfg, ticket.symbol, live)
-    prepared, state, reasons = cli.prepare_ticket(ticket, broker, journal, cfg, quick=True)
-    return broker, prepared, state, reasons
+    prepared, state, reasons, warnings = cli.prepare_user_ticket(ticket, broker, journal, cfg, quick=True)
+    return broker, prepared, state, reasons, warnings
 
 
-def _preview_body(cfg, live: bool, broker, prepared: OrderTicket, state, reasons: list[str]) -> dict[str, Any]:
+def _setup_of(journal: Journal, ticket: OrderTicket):
+    if not ticket.setup_id or ticket.setup_id == "manual":
+        return None
+    return journal.get_setup(ticket.setup_id)
+
+
+def _preview_body(
+    cfg, live: bool, broker, prepared: OrderTicket, state, reasons: list[str], warnings: list[str] | None = None,
+    setup=None,
+) -> dict[str, Any]:
     metrics = ticket_metrics(prepared, state.equity, cfg.risk.mmr)
     gain = metrics.rr * metrics.risk_amount if metrics.rr is not None else None
     return {
@@ -120,6 +126,8 @@ def _preview_body(cfg, live: bool, broker, prepared: OrderTicket, state, reasons
         },
         "account": {"broker": broker.name, "environment": broker.environment, "real_money": not getattr(broker, "is_demo", False)},
         "reasons": reasons,
+        "warnings": warnings or [],
+        "explanation": explain(prepared, setup),
     }
 
 
@@ -127,24 +135,26 @@ def preview(cfg, live: bool, body: dict[str, Any]) -> dict[str, Any]:
     journal = Journal(cfg.journal_path)
     try:
         ticket = _load(journal, body.get("ticket_id"), status="new")
-        broker, prepared, state, reasons = _prepared(cfg, live, journal, ticket)
-        return _preview_body(cfg, live, broker, prepared, state, reasons)
+        broker, prepared, state, reasons, warnings = _prepared(cfg, live, journal, ticket)
+        return _preview_body(cfg, live, broker, prepared, state, reasons, warnings, _setup_of(journal, ticket))
     finally:
         journal.close()
 
 
 def execute(cfg, live: bool, body: dict[str, Any]) -> dict[str, Any]:
-    _require_confirmation(body.get("confirm"))
     journal = Journal(cfg.journal_path)
     try:
         ticket = _load(journal, body.get("ticket_id"), status="new")
-        broker, prepared, state, reasons = _prepared(cfg, live, journal, ticket)
+        broker, prepared, state, reasons, warnings = _prepared(cfg, live, journal, ticket)
         if reasons:
             journal.add_ticket_note(ticket.id, "panel onayı reddedildi: " + " | ".join(reasons))
-            raise ActionError(409, "Kontroller emri reddetti; hiçbir emir gönderilmedi.", {"reasons": reasons})
-        journal.add_ticket_note(ticket.id, f"panelden onaylandı ({cli.CONFIRM_WORD} yazıldı)")
+            raise ActionError(409, "Bu emir gönderilemez; hiçbir emir gönderilmedi.", {"reasons": reasons})
+        note = "panelden onaylandı (tıklama)"
+        if warnings:
+            note += "; kullanıcı uyarıları gördü: " + " | ".join(warnings)
+        journal.add_ticket_note(ticket.id, note)
         mode = "live" if cli.live_enabled(cfg, live) else "paper"
-        outcome = cli.send_confirmed(prepared, broker, journal, cfg, mode, quick=True)
+        outcome = cli.send_confirmed(prepared, broker, journal, cfg, mode, quick=True, user=True)
         result = {"status": outcome.status, "lines": outcome.lines, "orders": _orders(outcome.orders)}
         if outcome.status == "sent":
             return result
@@ -182,7 +192,6 @@ def cancel(cfg, live: bool, body: dict[str, Any]) -> dict[str, Any]:
 
 
 def kill(cfg, live: bool, body: dict[str, Any]) -> dict[str, Any]:
-    _require_confirmation(body.get("confirm"))
     enabled = cli.live_enabled(cfg, live)
     brokers = _account_brokers(cfg, live)
     if not brokers:
@@ -230,17 +239,17 @@ def _risk_pct(cfg, body: dict[str, Any]) -> float:
     if body.get("risk_pct") in (None, ""):
         return cfg.risk.risk_pct
     value = _number(body, "risk_pct", "Risk yüzdesi")
-    if value > cfg.risk.max_risk_pct:
-        raise ActionError(400, f"Risk yüzdesi %{value:g}, üst sınır %{cfg.risk.max_risk_pct:g} (config: risk.max_risk_pct).")
-    return value
+    if value > 100:
+        raise ActionError(400, "Risk yüzdesi bakiyenin %100'ünü aşamaz.")
+    return value  # above risk.max_risk_pct it is a warning in the preview, not a block
 
 
 def _leverage(cfg, body: dict[str, Any], default: float) -> float:
     if body.get("leverage") in (None, "", "auto"):
         return default
     value = _number(body, "leverage", "Kaldıraç")
-    if not value.is_integer() or not 1 <= value <= cfg.risk.max_leverage:
-        raise ActionError(400, f"Kaldıraç 1 ile {cfg.risk.max_leverage:g} arasında tam sayı olmalı.")
+    if not value.is_integer() or not 1 <= value <= 125:
+        raise ActionError(400, "Kaldıraç 1 ile 125 arasında tam sayı olmalı.")
     return value
 
 
@@ -260,8 +269,9 @@ def modify(cfg, live: bool, body: dict[str, Any]) -> dict[str, Any]:
             ticket.id, f"panelden düzenlendi: giriş {entry:g}, stop {stop:g}, hedef {target:g}, "
             f"risk %{edited.risk_pct:g}, kaldıraç {edited.leverage:g}x"
         )
-        broker, prepared, state, reasons = _prepared(cfg, live, journal, journal.get_ticket(ticket.id))
-        return _preview_body(cfg, live, broker, prepared, state, reasons)
+        stored = journal.get_ticket(ticket.id)
+        broker, prepared, state, reasons, warnings = _prepared(cfg, live, journal, stored)
+        return _preview_body(cfg, live, broker, prepared, state, reasons, warnings, _setup_of(journal, stored))
     finally:
         journal.close()
 
@@ -292,8 +302,8 @@ def manual(cfg, live: bool, body: dict[str, Any]) -> dict[str, Any]:
     try:
         journal.save_user_ticket(ticket)
         journal.add_ticket_note(ticket.id, "panelden elle oluşturuldu")
-        broker, prepared, state, reasons = _prepared(cfg, live, journal, ticket)
-        return _preview_body(cfg, live, broker, prepared, state, reasons)
+        broker, prepared, state, reasons, warnings = _prepared(cfg, live, journal, ticket)
+        return _preview_body(cfg, live, broker, prepared, state, reasons, warnings, None)
     finally:
         journal.close()
 
@@ -346,10 +356,6 @@ def _holder(cfg, live: bool, symbol: str):
     raise ActionError(404, f"{symbol} için açık pozisyon yok.")
 
 
-def _require_word_for_real_money(broker, body: dict[str, Any]) -> None:
-    if not getattr(broker, "is_demo", False) and body.get("confirm") != cli.CONFIRM_WORD:
-        raise ActionError(400, f"Gerçek para hesabında bu işlem için tam olarak {cli.CONFIRM_WORD} yazın.")
-
 
 def close(cfg, live: bool, body: dict[str, Any]) -> dict[str, Any]:
     symbol = _symbol(body)
@@ -360,7 +366,6 @@ def close(cfg, live: bool, body: dict[str, Any]) -> dict[str, Any]:
     if not (math.isfinite(fraction) and 0 < fraction <= 1):
         raise ActionError(400, "Kapatılacak oran 0'dan büyük ve en fazla 1 olmalı.")
     broker = _holder(cfg, live, symbol)
-    _require_word_for_real_money(broker, body)
     closer = getattr(broker, "close_position", None)
     if closer is None:
         raise ActionError(501, f"{broker.name} için tek pozisyon kapatma desteklenmiyor; Acil durdur'u kullanın.")
@@ -377,7 +382,6 @@ def protect(cfg, live: bool, body: dict[str, Any]) -> dict[str, Any]:
     for key, label in (("stop", "Stop"), ("take_profit", "Hedef")):
         levels[key] = None if body.get(key) in (None, "") else _number(body, key, label)
     broker = _holder(cfg, live, symbol)
-    _require_word_for_real_money(broker, body)
     setter = getattr(broker, "set_protection", None)
     if setter is None:
         raise ActionError(501, f"{broker.name} için stop/hedef değiştirme desteklenmiyor.")
@@ -404,6 +408,32 @@ def candles(cfg, live: bool, body: dict[str, Any]) -> dict[str, Any]:
     return {"symbol": symbol, "timeframe": timeframe, "candles": rows}
 
 
+# --- god mode ------------------------------------------------------------------------------------------------
+
+
+def god_mode(cfg, live: bool, body: dict[str, Any]) -> dict[str, Any]:
+    from tradeagent import god
+
+    if not body.get("on"):
+        state = god.load(cfg)
+        state = replace(state, on=False, stopped_reason="kullanıcı kapattı")
+        god.save(cfg, state)
+        return {"god": {**state.as_dict()}}
+    goal = cfg.goal
+    if not goal.enabled:
+        raise ActionError(400, "God mode için ayrılmış sermaye gerekli: config.yaml → goal.start_capital (ör. 100).")
+    enabled = cli.live_enabled(cfg, live)
+    account = f"ccxt:{cfg.crypto.exchange}" if enabled else "paper"
+    real_money = enabled and not cfg.crypto.testnet
+    if not body.get("accept"):
+        raise ActionError(400, "God mode kurallarını okuyup onaylayın (stop zorunlu, ayrılan sermaye, iflas freni, kâr kilidi).")
+    state = god.GodState(on=True, account=account, real_money=real_money, start_capital=goal.start_capital,
+                         target=goal.target, peak=goal.start_capital, since=datetime.now(UTC).isoformat())
+    state = god.update(state, goal.start_capital, cfg.god)
+    god.save(cfg, state)
+    return {"god": state.as_dict()}
+
+
 ACTIONS = {
     "/api/preview": preview,
     "/api/execute": execute,
@@ -417,4 +447,5 @@ ACTIONS = {
     "/api/close": close,
     "/api/protect": protect,
     "/api/candles": candles,
+    "/api/god": god_mode,
 }
